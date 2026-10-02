@@ -38,6 +38,16 @@ period code the vendor returned.
 The statistical basis (``i_mark``) lives only in the catalog endpoint, not in the data
 response, so it is fetched once per catalog and cached; a failure there degrades the
 provenance note, never the data read.
+
+Series deliberately **not** offered
+----------------------------------
+Total industrial profit (规模以上工业企业利润总额) is published by the agency, but the two
+catalog slices that name it do not serve current data: probed live, one returns nothing at
+all for 2011-2026 and the other stops at 2011-12, and the 135-indicator revenue catalog
+carries profit only by industry. Since neither slice can answer "what is the current
+print", the metric is left out instead of being approximated from a stale archive. Money
+supply is absent for a different reason: it is central-bank data, not a statistical-agency
+series.
 """
 
 from __future__ import annotations
@@ -169,7 +179,39 @@ SERIES: dict[str, Series] = {
     "FAI": Series("FAI", "固定资产投资（不含农户）", "monthly",
                   "5129067b149d4ddfbec1ffc478d35bfb", [
                       Metric("fai_ytd_yoy", "7e570cf8071c4734a7d78d9f0a70fbe1", "percent"),
+                      Metric("fai_primary_ytd_yoy", "14f9561997d84321bd606c97977086bb",
+                             "percent"),
+                      Metric("fai_secondary_ytd_yoy", "92f72710d3ec46e79c6cb0e647a7fa91",
+                             "percent"),
+                      Metric("fai_tertiary_ytd_yoy", "eea023b7fb454ae6aebcf1aefe50a936",
+                             "percent"),
                   ]),
+    # Real estate is the single most A-share-relevant official block: property investment
+    # and new-home sales feed both the developers and the whole downstream chain.
+    "REALESTATE": Series("REALESTATE", "房地产开发投资", "monthly",
+                         "9206137ccf03460daa74b7799e0f3c31", [
+                             Metric("realestate_investment_ytd",
+                                    "bfb626c0dfa04afab67937c452ca9f50", "CNY_100m", "CNY"),
+                             Metric("realestate_investment_ytd_yoy",
+                                    "205e08cba8c2409980db58c98da91b6f", "percent"),
+                         ]),
+    "PROPERTY_SALES": Series("PROPERTY_SALES", "新建商品房销售", "monthly",
+                             "0ae633cdb85f4a8397650831b2b27e50", [
+                                 Metric("property_sales_area_ytd",
+                                        "d353226cf0434c929b6299f8d4987754", "10k_sqm"),
+                                 Metric("property_sales_area_ytd_yoy",
+                                        "50a37fbef1d04be68f15d82b711783bf", "percent"),
+                             ]),
+    # Industrial revenue survives the time-slice probe below; total industrial *profit*
+    # does not (see the module docstring), so it is left out rather than approximated.
+    "INDUSTRIAL_REVENUE": Series("INDUSTRIAL_REVENUE", "工业企业营业收入", "monthly",
+                                 "95fa01deb3f64a7cbcecb9d888b16492", [
+                                     Metric("industrial_revenue_ytd",
+                                            "cfb5e8c8176b48c7bb5ae4911b212351",
+                                            "CNY_100m", "CNY"),
+                                     Metric("industrial_revenue_ytd_yoy",
+                                            "491f3011a43847a0ab24f4e9a550b208", "percent"),
+                                 ]),
     "INDUSTRIAL": Series("INDUSTRIAL", "规模以上工业增加值", "monthly",
                          "3f2e14f0542348ed9fe02476eca3450b", [
                              Metric("industrial_value_added_yoy",
@@ -177,6 +219,13 @@ SERIES: dict[str, Series] = {
                              Metric("industrial_value_added_ytd_yoy",
                                     "21e7072e9f384209aedb56e69a18216e", "percent"),
                          ]),
+    "INCOME": Series("INCOME", "居民人均可支配收入", "quarterly",
+                     "ec2d57ed282f456e8d025aff035b4fad", [
+                         Metric("household_income_per_capita_ytd",
+                                "bb5699c5ad534b568cca7c946227225a", "CNY", "CNY"),
+                         Metric("household_income_per_capita_ytd_yoy",
+                                "7abcbb6f7c844b669d43da985d3f6ff2", "percent"),
+                     ]),
     "GDP": Series("GDP", "国内生产总值", "quarterly",
                   "28d936104e304aa191e338eb82b6dc09", [
                       Metric("gdp_quarterly", "d22612f09aeb4241bc557ef0ac61b3ba",

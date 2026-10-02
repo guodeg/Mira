@@ -96,7 +96,8 @@ FETCHERS = {
     "macro_china": ("China CPI/PPI/GDP/PMI (L5 relay of official releases)",
                     eastmoney_macro.fetch_macro_china,
                     eastmoney_macro.ENDPOINT),
-    "macro_nbs": ("Official NBS series: CPI/PPI/PMI/unemployment/retail/FAI/GDP (L2)",
+    "macro_nbs": ("Official NBS series: prices, PMI trio, industrial output/revenue, "
+                  "property, investment, income, retail and GDP (L2)",
                   nbs_stats.fetch_macro_nbs, nbs_stats.ENDPOINT),
 }
 
