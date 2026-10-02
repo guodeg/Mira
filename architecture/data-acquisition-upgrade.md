@@ -363,6 +363,21 @@ tier split.
 | L5 | options_surface | ETF options over the same CLI (`hithink_finance_api`) | market_pricing | `mira_data fetch option_surface 510050` |
 | L5 | macro_series | Eastmoney national-accounts relay (`eastmoney_macro_api`) | reported_metric | `mira_data fetch macro_china ALL` |
 
+Two families were added after this table was first written, both mainland and both official:
+`macro_region` (provincial GDP and household income over the agency's 31-province and 71-city
+catalogues, read as a period x region matrix) and the CSI index families — `index_benchmark`
+(official index history and profile), `index_members` (composition and weights) and
+`index_valuation` (the compiler's own P/E and dividend yield). Together they close the two gaps
+the protocol names explicitly: the benchmark denominator (`benchmark_ohlcv` in
+`data/public-source-targets.md`, plus the `relative_return_*` columns of the technical check
+template) and the valuation anchor the A-share market-structure gate requires. The index
+composition and valuation families read the compiler's **OLE2/BIFF .xls** workbooks, so they
+take `xlrd` as an optional dependency (lazy import, `csindex_dependency_gap` without it) in the
+same spirit as `futu-api` / `ib_insync`; the workbooks are parsed positionally because their
+header rows are bilingual, the weights file can carry a different date from the constituent
+file, and the valuation workbook holds only the latest ~21 observations — all three recorded in
+provenance rather than assumed away.
+
 Every channel above walks the same contract: a `data/source-registry.csv` row, a 1:1
 `data/source-class-map.csv` row, a `POSTURES` entry, a `SOURCE_POLICY` entry, an offline
 suite registered in the quality gate, a clean `validate_repo.py`, and a bundle whose

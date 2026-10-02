@@ -260,6 +260,31 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # The index compiler publishing its own index level and composition. The class default is
+    # L5, but for a benchmark the compiler is the authoritative source, so the registry
+    # overrides the level to L2 and says why (the same pattern the SEC dataset rows use).
+    "csindex_index": Posture(
+        source_id="csindex_index_api",
+        source_class="market_price_and_trading",
+        authority_level="L2",
+        claim_type="market_pricing",
+        evidence_category="market_pricing",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    # Same source and class, but the claim is the compiler's own valuation ratio for the index
+    # (P/E and dividend yield on two share-capital bases) rather than a traded price.
+    "csindex_index_valuation": Posture(
+        source_id="csindex_index_api",
+        source_class="market_price_and_trading",
+        authority_level="L2",
+        claim_type="market_pricing",
+        evidence_category="market_pricing",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

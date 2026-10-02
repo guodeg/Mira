@@ -181,6 +181,16 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Index compiler publishing its own index data: official for that index, still market
+    # pricing rather than a fundamentals fact.
+    "csindex_index_api": dict(
+        provider="China Securities Index Co. (中证指数有限公司)",
+        speaker="official_agency",
+        license_scope="public_index_provider_terms_unverified", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

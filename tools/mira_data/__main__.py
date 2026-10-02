@@ -13,17 +13,18 @@ import argparse
 import sys
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bls, chinamoney_rates, cninfo_disclosure, eastmoney_consensus,
-                       eastmoney_macro, exchange_margin, futu_opend, hithink_finance,
-                       hithink_options, ibkr_gateway, investor_qa, nbs_stats,
-                       news_pointers, sec_companyfacts, yahoo_chart)
+from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
+                       eastmoney_consensus, eastmoney_macro, exchange_margin, futu_opend,
+                       hithink_finance, hithink_options, ibkr_gateway, investor_qa,
+                       nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
-                     "macro_nbs", "macro_region")
+                     "macro_nbs", "macro_region", "index_benchmark", "index_members",
+                     "index_valuation")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
@@ -103,6 +104,12 @@ FETCHERS = {
     "macro_region": ("Official NBS regional statistics: provincial GDP/income, "
                      "地级市 catalogue (L2)",
                      nbs_stats.fetch_nbs_region, nbs_stats.ENDPOINT),
+    "index_benchmark": ("Official CSI index history and profile (中证指数公司, L2 benchmark)",
+                        csindex_index.fetch_index_benchmark, csindex_index.ENDPOINT),
+    "index_members": ("Official CSI index composition and weights (xls, needs xlrd)",
+                      csindex_index.fetch_index_members, csindex_index.ENDPOINT),
+    "index_valuation": ("Official CSI index valuation series: P/E and dividend yield (L2)",
+                        csindex_index.fetch_index_valuation, csindex_index.ENDPOINT),
 }
 
 
@@ -139,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="macro_region only: comma-separated region names, e.g. 北京,上海,广东")
     f.add_argument("--region-kind", default="province", choices=("province", "city"),
                    help="macro_region only: province (31) or major-city (71) catalog")
+    f.add_argument("--no-weights", action="store_true",
+                   help="index_members only: read the constituent list without the weight file")
     f.add_argument("--max-contracts", type=int, default=None,
                    help="option_surface only: cap on priced contracts")
     f.add_argument("--no-emit", action="store_true", help="print records only, don't write files")
@@ -574,6 +583,7 @@ def _do_config(_args) -> int:
         "MIRA_OPTIONS_MAX_CONTRACTS", "MIRA_OPTIONS_SCAN_ROWS", "MIRA_OPTIONS_QUOTE_DAYS",
         "MIRA_MACRO_MAX_OBSERVATIONS", "MIRA_NBS_MONTHS", "MIRA_NBS_CACHE_DAYS",
         "MIRA_NBS_PAUSE", "MIRA_NEWS_MAX_ITEMS", "MIRA_NEWS_WINDOW_DAYS",
+        "MIRA_CSINDEX_YEARS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -620,6 +630,10 @@ def _do_fetch(args) -> int:
         print(f"error: --regions applies to the macro_region family, not {family}",
               file=sys.stderr)
         return 2
+    if args.no_weights and family != "index_members":
+        print(f"error: --no-weights applies to the index_members family, not {family}",
+              file=sys.stderr)
+        return 2
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
         symbol = config.get("MIRA_IBKR_ACCOUNT", "ALL") or "ALL"
@@ -643,6 +657,8 @@ def _do_fetch(args) -> int:
     elif family == "macro_region":
         kwargs.update(regions=[part for part in (args.regions or "").split(",") if part.strip()]
                       or None, kind=args.region_kind)
+    elif family == "index_members":
+        kwargs["with_weights"] = not args.no_weights
     try:
         res = fetcher(symbol, as_of=args.as_of, market_scope=market_scope, **kwargs)
     except net.FetchError as exc:
@@ -745,6 +761,12 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "next provincial release; a multi-region read returns the latest period only, so "
             "a history needs one region per call"
+        )
+    elif family in {"index_benchmark", "index_members", "index_valuation"}:
+        must_refresh_if = (
+            "next index close or the compiler's next composition/valuation file; the weights "
+            "workbook can lag the constituent workbook, and the valuation workbook carries "
+            "only the latest ~21 observations"
         )
     else:
         must_refresh_if = ""

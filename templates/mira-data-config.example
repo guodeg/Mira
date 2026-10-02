@@ -136,6 +136,15 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_NEWS_MAX_ITEMS=30
 # MIRA_NEWS_WINDOW_DAYS=30
 
+# --- CSI (中证指数) official index data ---------------------------------------
+# Benchmark history and profile are keyless JSON (dates must be YYYYMMDD). Composition,
+# weights and the index valuation series are published only as OLE2/BIFF .xls workbooks,
+# so those two families need the optional dependency `xlrd`:
+#     pip install xlrd
+# Without it they degrade to `csindex_dependency_gap`; every other family keeps working.
+# The valuation workbook carries only the latest ~21 observations.
+# MIRA_CSINDEX_YEARS=3
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and
