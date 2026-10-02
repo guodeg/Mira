@@ -83,16 +83,46 @@ def test_classify_falls_back_to_title_then_other() -> None:
         announcementType="01010503||010113"))          # noise codes only
     assert token == "shareholder_reduction" and basis == "title"
 
+    # 012399 is an ambiguous vendor bucket (业绩说明会 / 投资者关系活动记录表 / 股东会),
+    # so it must NOT mint a token on its own — the title decides, or nothing does.
     token, basis = cn.classify(_announcement(
         announcementTitle="关于召开2026年第二次临时股东会的通知",
         announcementType="01010503||010113||012399"))
-    # 012399 (业绩说明会) is verified, so it wins; the title rule never runs.
-    assert token == "earnings_briefing"
+    assert token == "shareholder_meeting" and basis == "title"
+
+    token, basis = cn.classify(_announcement(
+        announcementTitle="关于某件无法归类的事项", announcementType="01010503||012399"))
+    assert token == "other" and basis.startswith("announcement_type:ambiguous")
 
     token, basis = cn.classify(_announcement(
         announcementTitle="关于某件无法归类的事项", announcementType="01010503"))
     assert token == "other" and basis == "unknown"
     print("ok unmapped input degrades to title rules and finally to other/unknown")
+
+
+def test_ir_research_records_are_their_own_event() -> None:
+    """《投资者关系活动记录表》 is the primary source for institutional research."""
+    token, basis = cn.classify(_announcement(
+        announcementTitle="索宝蛋白_2026年09月21日投资者关系活动记录表",
+        announcementType="01010501||010113||012399"))
+    assert token == "investor_relations_record" and basis == "title"
+
+    token, _ = cn.classify(_announcement(
+        announcementTitle="投资者关系活动记录表", announcementType="01010501||010112||010115||012399"))
+    assert token == "investor_relations_record"
+
+    # A 业绩说明会 record is still its own thing.
+    token, _ = cn.classify(_announcement(
+        announcementTitle="宁波精达2026年投资者关系活动记录表(2026年半年度业绩说明会）",
+        announcementType="01010501||010113||012399"))
+    assert token == "earnings_briefing"
+
+    # Governance documents that merely mention 调研 are not research records.
+    token, basis = cn.classify(_announcement(
+        announcementTitle="投资者调研接待工作管理办法（2026年8月）",
+        announcementType="01010503||010112||013199"))
+    assert token == "other" and basis == "title:policy_document"
+    print("ok IR activity records, briefings and policy documents are told apart")
 
 
 def test_report_shells_are_not_the_report_body() -> None:
@@ -227,6 +257,34 @@ def test_category_filter_still_demotes_report_shells() -> None:
     print("ok category filtering still demotes report shells, other categories unaffected")
 
 
+def test_operating_flash_and_cross_listing_filings() -> None:
+    """Monthly 产销快报 and mirrored H-share filings are common enough to name."""
+    token, basis = cn.classify(_announcement(
+        announcementTitle="2026年8月产销快报", announcementType="01010503||010112||012305"))
+    assert token == "operating_data_release" and basis == "title"
+
+    token, _ = cn.classify(_announcement(
+        announcementTitle="H股公告（二零二六年中期业绩公告）",
+        announcementType="01010503||010112||012399"))
+    assert token == "cross_listing_filing"
+
+    token, _ = cn.classify(_announcement(
+        announcementTitle="关于公司及其控股子公司开展资产池业务并进行对外担保的公告",
+        announcementType="01010503||010112||011711||012399"))
+    assert token == "guarantee"
+
+    # Governance paperwork stays out of the event stream even though it mentions
+    # things that would otherwise trip a rule.
+    for title in ("战略及可持续发展委员会实施细则（2026年9月）",
+                  "独立董事候选人声明与承诺（喻玲）",
+                  "关于修订公司章程的公告",
+                  "总裁工作细则（2026年9月）"):
+        token, basis = cn.classify(_announcement(
+            announcementTitle=title, announcementType="01010503||010112||013199"))
+        assert token == "other" and basis == "title:policy_document", (title, token, basis)
+    print("ok 产销快报 and H股公告 are named; governance paperwork stays out")
+
+
 def test_registry_rows_are_registered() -> None:
     for path, column, expected in (
         (ROOT / "data" / "source-registry.csv", "source_id", None),
@@ -249,6 +307,7 @@ def test_registry_rows_are_registered() -> None:
 def main() -> int:
     test_classify_prefers_announcement_type_over_title()
     test_classify_falls_back_to_title_then_other()
+    test_ir_research_records_are_their_own_event()
     test_report_shells_are_not_the_report_body()
     test_broken_category_raises_instead_of_widening()
     test_beijing_epoch_decode()
@@ -256,6 +315,7 @@ def main() -> int:
     test_fetch_builds_l1_records_and_needs_no_ledger()
     test_paging_respects_max_items_and_has_more()
     test_category_filter_still_demotes_report_shells()
+    test_operating_flash_and_cross_listing_filings()
     test_registry_rows_are_registered()
     print("mira_data_cninfo_tests: pass")
     return 0

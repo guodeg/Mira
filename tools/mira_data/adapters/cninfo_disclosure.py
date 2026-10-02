@@ -112,7 +112,6 @@ TYPE_TOKENS = {
     "011513": "buyback",                    # 回购实施进展公告 / 回购进展公告
     "011501": "shareholder_reduction",      # 减持股份结果公告 (x4)
     "012111": "earnings_preannouncement",   # 业绩预告的自愿性披露公告
-    "012399": "earnings_briefing",          # 业绩说明会预告公告 (x3)
     "012327": "contract_award",             # 项目中标公告 (x3)
     "012309": "litigation",                 # 诉讼进展公告 / 累计诉讼、仲裁
     "012311": "litigation",                 # co-occurs with 012309 on 仲裁 rows
@@ -122,8 +121,13 @@ TYPE_TOKENS = {
     "010109": "intermediary_report",        # 核查意见
     "010303": "periodic_report_h1",         # 半年度报告 (single sample: treat as a hint)
 }
+# Codes that look specific but are not: 012399 was first seen on 业绩说明会预告公告 (x3) and
+# mapped to earnings_briefing, but later probes found the same code on 投资者关系活动记录表
+# (5 Shanghai + 1 Shenzhen rows) and even on a 股东会通知. It is a broad IR/governance bucket,
+# so it must defer to the title instead of minting a specific claim token.
+AMBIGUOUS_TYPE_CODES = {"012399"}
 # Present on nearly every record / merely encode the venue; they carry no signal.
-TYPE_NOISE = {"01010503", "010113", "010123"}
+TYPE_NOISE = {"01010503", "010113", "010123", "010112", "010115", "01010501"}
 
 # Fallback when announcementType says nothing usable. Ordered: first match wins.
 TITLE_RULES: list[tuple[str, str]] = [
@@ -131,9 +135,10 @@ TITLE_RULES: list[tuple[str, str]] = [
     (r"\d{4}年半年度报告", "periodic_report_h1"),
     (r"\d{4}年第一季度报告", "periodic_report_q1"),
     (r"\d{4}年第三季度报告", "periodic_report_q3"),
+    (r"业绩说明会|业绩暨.*说明会", "earnings_briefing"),
+    (r"投资者关系活动记录表|调研活动记录|接待调研记录", "investor_relations_record"),
     (r"业绩预告", "earnings_preannouncement"),
     (r"业绩快报", "earnings_flash"),
-    (r"业绩说明会|业绩暨.*说明会", "earnings_briefing"),
     (r"回购", "buyback"),
     (r"减持", "shareholder_reduction"),
     (r"增持", "shareholder_increase"),
@@ -147,14 +152,21 @@ TITLE_RULES: list[tuple[str, str]] = [
     (r"解禁|上市流通", "share_unlock"),
     # A-share specific and unambiguous; the type codes for these are unmapped
     # (single samples only), and a title rule beats admitting "other" for them.
-    (r"主要经营数据", "operating_data_release"),
+    # 产销快报 / 主要经营数据 is a monthly operating datapoint many A-share names publish
+    # ahead of their filings, so it is worth a token of its own.
+    (r"主要经营数据|产销快报|产量.{0,4}销量", "operating_data_release"),
+    (r"H股公告|H股通函|H股月报表", "cross_listing_filing"),
     (r"关联交易", "related_party_transaction"),
+    (r"对外担保|提供担保|担保额度", "guarantee"),
     (r"会计师事务所", "auditor_engagement"),
     (r"会计政策变更|会计估计变更", "accounting_change"),
     (r"聘任|辞职|离任|选举", "management_change"),
 ]
 # Periodic-report shells that must not be classified as the report body itself.
 _REPORT_SHELLS = ("摘要", "审计报告", "内部控制", "鉴证报告", "提示性公告", "更正")
+# Governance documents that merely mention 调研/回购/减持 etc.; they are not events.
+_POLICY_DOCS = ("管理办法", "管理制度", "工作细则", "工作制度", "议事规则",
+                "实施细则", "公司章程", "章程", "声明与承诺", "工作规则")
 _EM_TAG = re.compile(r"</?em>")
 
 
@@ -322,20 +334,32 @@ def classify(announcement: dict, *, category: str = "") -> tuple[str, str]:
         if token.startswith("periodic_report") and _is_report_shell(title):
             return "other", f"category:{category}:report_shell"
         return token, "category"
-    for code in str(announcement.get("announcementType") or "").split("||"):
-        token = TYPE_TOKENS.get(code.strip())
+    codes = [code.strip() for code in str(announcement.get("announcementType") or "").split("||")]
+    for code in codes:
+        token = TYPE_TOKENS.get(code)
         if token:
-            return token, f"announcement_type:{code.strip()}"
+            return token, f"announcement_type:{code}"
+    if _is_policy_doc(title):
+        return "other", "title:policy_document"
     if _is_report_shell(title) and re.search(r"\d{4}年(年度|半年度|第一季度|第三季度)报告", title):
         return "other", "title:report_shell"
     for pattern, token in TITLE_RULES:
         if re.search(pattern, title):
             return token, "title"
+    if any(code in AMBIGUOUS_TYPE_CODES for code in codes):
+        # The vendor bucket covers 业绩说明会 / 投资者关系活动记录表 / 股东会 alike, and the
+        # title matched none of them, so no specific token is defensible here.
+        return "other", "announcement_type:ambiguous(012399)"
     return "other", "unknown"
 
 
 def _is_report_shell(title: str) -> bool:
     return any(shell in title for shell in _REPORT_SHELLS)
+
+
+def _is_policy_doc(title: str) -> bool:
+    """管理办法/制度类文件提到调研，但不是一次调研记录。"""
+    return any(marker in title for marker in _POLICY_DOCS)
 
 
 def bj_date(epoch_ms) -> str:
