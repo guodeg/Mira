@@ -13,7 +13,8 @@ import argparse
 import sys
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import bls, futu_opend, ibkr_gateway, sec_companyfacts, yahoo_chart
+from .adapters import (bls, cninfo_disclosure, futu_opend, hithink_finance,
+                       ibkr_gateway, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 FETCHERS = {
@@ -43,6 +44,16 @@ FETCHERS = {
     "futu_future_info": ("Futu OpenD local Gateway futures info",
                          futu_opend.fetch_future_info,
                          futu_opend.OPEND_ENDPOINT),
+    "hithink_market_price": ("Tonghuashun A-share market data (hithink-finance CLI)",
+                             hithink_finance.fetch_market_price,
+                             hithink_finance.SNAPSHOT_ENDPOINT),
+    "hithink_company_financials": ("Tonghuashun A-share standardized statements "
+                                   "(hithink-finance CLI)",
+                                   hithink_finance.fetch_company_financials,
+                                   hithink_finance.FINANCIALS_ENDPOINT),
+    "cninfo_announcements": ("CNINFO A-share announcement index (L1 primary disclosure)",
+                             cninfo_disclosure.fetch_issuer_disclosures,
+                             cninfo_disclosure.ENDPOINT),
 }
 
 
@@ -55,7 +66,19 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("symbol", nargs="?")
     f.add_argument("--out", default="private/data-smoke", help="output directory")
     f.add_argument("--as-of", default=None, help="as-of date YYYY-MM-DD (default today)")
-    f.add_argument("--market-scope", default="US")
+    f.add_argument("--market-scope", default=None,
+                   help="market scope (default: CN for hithink_* families, US otherwise)")
+    f.add_argument("--cash-flow-span", choices=sec_companyfacts.CASH_FLOW_SPANS,
+                   default="quarter",
+                   help="SEC cash-flow metrics only: 'quarter' = latest clean single "
+                        "quarter (default), 'ytd' = newest cumulative filing "
+                        "reconciled to a quarter by differencing prior YTD rows")
+    f.add_argument("--since", default=None, help="cninfo_announcements only: YYYY-MM-DD window start")
+    f.add_argument("--until", default=None, help="cninfo_announcements only: YYYY-MM-DD window end")
+    f.add_argument("--category", default="", choices=[""] + sorted(cninfo_disclosure.CATEGORY_TOKENS),
+                   help="cninfo_announcements only: server-side announcement category")
+    f.add_argument("--max-items", type=int, default=None,
+                   help="cninfo_announcements only: cap on announcements read")
     f.add_argument("--no-emit", action="store_true", help="print records only, don't write files")
 
     t = sub.add_parser("technical", help="compute technical context for a symbol")
@@ -115,6 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     futu_sub = futu.add_subparsers(dest="futu_cmd", required=True)
     futu_sub.add_parser("probe", help="connect to local Futu OpenD and close")
 
+    hithink = sub.add_parser("hithink", help="read-only hithink-finance CLI utilities")
+    hithink_sub = hithink.add_subparsers(dest="hithink_cmd", required=True)
+    hithink_sub.add_parser("probe", help="check the hithink-finance CLI version and auth state")
+
+    cninfo = sub.add_parser("cninfo", help="read-only CNINFO disclosure-portal utilities")
+    cninfo_sub = cninfo.add_subparsers(dest="cninfo_cmd", required=True)
+    cninfo_sub.add_parser("probe", help="check the org-id map and a live announcement query")
+
     args = parser.parse_args(argv)
     if args.cmd == "fetch":
         return _do_fetch(args)
@@ -132,6 +163,10 @@ def main(argv: list[str] | None = None) -> int:
         return _do_ibkr(args)
     if args.cmd == "futu":
         return _do_futu(args)
+    if args.cmd == "hithink":
+        return _do_hithink(args)
+    if args.cmd == "cninfo":
+        return _do_cninfo(args)
     parser.error("unknown command")
     return 2
 
@@ -185,12 +220,21 @@ def _do_screen(args) -> int:
           f"{s['pass']} pass / {s['fail']} fail / {s['data_gap']} data_gap")
     print(f"  criteria: {s['criteria']}")
     print(f"{'ticker':<12}{'status':<10}{'mkt_cap':>18}{'fcf_yld':>11}{'d/e':>11}"
-          f"{'margin':>11}{'rev_yoy':>11}  gaps")
+          f"{'margin':>11}{'rev_yoy':>11}  {'cash_flow_end':<14}{'yoy_basis':<26}gaps")
     for row in res.rows:
         print(f"{row['ticker']:<12}{row['screen_status']:<10}"
               f"{_fmt_metric(row['market_cap_usd']):>18}{_fmt_metric(row['fcf_yield']):>11}"
               f"{_fmt_metric(row['debt_to_equity']):>11}{_fmt_metric(row['net_margin']):>11}"
-              f"{_fmt_metric(row['revenue_yoy']):>11}  {row['data_gaps']}")
+              f"{_fmt_metric(row['revenue_yoy']):>11}  "
+              f"{row['cash_flow_period_end']:<14}{row['revenue_yoy_period']:<26}"
+              f"{row['data_gaps']}")
+    mixed = [r["ticker"] for r in res.rows
+             if r["cash_flow_period_end"] != "source_gap"
+             and r["revenue_yoy_period"] != "source_gap"]
+    if mixed:
+        print("  basis note: fcf_yield/net_margin use annual fiscal periods while "
+              "revenue_yoy uses a quarterly YoY — compare the two period columns "
+              f"per row before ranking ({', '.join(mixed)})")
 
     if args.no_emit:
         return 0
@@ -330,6 +374,48 @@ def _do_futu(args) -> int:
     return 2
 
 
+def _do_hithink(args) -> int:
+    if args.hithink_cmd == "probe":
+        try:
+            info = hithink_finance.probe()
+        except net.FetchError as exc:
+            print(f"source_gap: could not use the hithink-finance CLI: {exc}", file=sys.stderr)
+            return 1
+        print("# hithink-finance cli")
+        print(f"  binary             : {info['binary']}")
+        print(f"  package            : {info['package']}")
+        print(f"  version            : {info['version']} (node {info['node']})")
+        print(f"  auth_method        : {info['auth_method']}")
+        print(f"  auth_profile       : {info['auth_profile']}")
+        print(f"  auth_configured    : {info['auth_configured']}")
+        print("  mode               : vendor_readonly")
+        if not info["auth_configured"]:
+            print("\nRun `hithink-finance auth login` before fetching remote A-share data.")
+        return 0
+
+    print(f"error: unknown hithink command {args.hithink_cmd}", file=sys.stderr)
+    return 2
+
+
+def _do_cninfo(args) -> int:
+    if args.cninfo_cmd == "probe":
+        try:
+            info = cninfo_disclosure.probe()
+        except net.FetchError as exc:
+            print(f"source_gap: could not use the CNINFO disclosure portal: {exc}", file=sys.stderr)
+            return 1
+        print("# cninfo announcement index")
+        print(f"  org_id_map_rows    : {info['org_ids']}")
+        print(f"  sample             : {info['sample_code']} -> orgId {info['sample_org_id']}")
+        print(f"  sample_total       : {info['sample_total']} announcements")
+        print(f"  sample_first       : {info['sample_first']}")
+        print("  mode               : public_readonly (no key, no cookie)")
+        return 0
+
+    print(f"error: unknown cninfo command {args.cninfo_cmd}", file=sys.stderr)
+    return 2
+
+
 def _do_config(_args) -> int:
     ua, configured = config.contact_ua()
     print("# mira_data config")
@@ -341,6 +427,8 @@ def _do_config(_args) -> int:
         "MIRA_IBKR_ACCOUNT", "MIRA_IBKR_READONLY", "MIRA_IBKR_MARKET_DATA_TYPE",
         "MIRA_FUTU_HOST", "MIRA_FUTU_PORT", "MIRA_FUTU_DEFAULT_MARKET",
         "MIRA_FUTU_CURRENCY",
+        "MIRA_HITHINK_BIN", "MIRA_HITHINK_TIMEOUT",
+        "MIRA_CNINFO_TIMEOUT", "MIRA_CNINFO_PAGE_SLEEP", "MIRA_CNINFO_MAX_ITEMS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -354,14 +442,33 @@ def _do_config(_args) -> int:
 def _do_fetch(args) -> int:
     family = _effective_fetch_family(args.family)
     label, fetcher, endpoint_tmpl = FETCHERS[family]
+    market_scope = args.market_scope or _default_market_scope(family)
+    cash_flow_span = getattr(args, "cash_flow_span", "quarter")
+    if cash_flow_span != "quarter" and family != "company_financials":
+        print(f"error: --cash-flow-span applies to the SEC company_financials family "
+              f"(A-share statements are filed per period and need no YTD reconciliation), "
+              f"not {family}", file=sys.stderr)
+        return 2
+    if family != "cninfo_announcements" and any(
+            value not in (None, "", 0)
+            for value in (args.since, args.until, args.category, args.max_items)):
+        print(f"error: --since/--until/--category/--max-items apply to the "
+              f"cninfo_announcements family, not {family}", file=sys.stderr)
+        return 2
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
         symbol = config.get("MIRA_IBKR_ACCOUNT", "ALL") or "ALL"
     elif not symbol:
         print(f"error: fetch {args.family} requires a symbol", file=sys.stderr)
         return 2
+    kwargs = {}
+    if family == "company_financials":
+        kwargs["cash_flow_span"] = cash_flow_span
+    elif family == "cninfo_announcements":
+        kwargs.update(since=args.since, until=args.until,
+                      category=args.category or "", max_items=args.max_items)
     try:
-        res = fetcher(symbol, as_of=args.as_of, market_scope=args.market_scope)
+        res = fetcher(symbol, as_of=args.as_of, market_scope=market_scope, **kwargs)
     except net.FetchError as exc:
         print(f"source_gap: could not fetch {args.family} for {symbol}: {exc}", file=sys.stderr)
         return 1
@@ -369,13 +476,19 @@ def _do_fetch(args) -> int:
     records = res.records
     if family.startswith("futu_"):
         display_object = _display_futu_symbol(symbol)
+    elif family.startswith(("hithink_", "cninfo_")):
+        try:
+            display_object = hithink_finance.resolve_thscode(symbol)
+        except net.FetchError as exc:
+            print(f"source_gap: could not resolve {symbol}: {exc}", file=sys.stderr)
+            return 1
     else:
         display_object = {
             "ibkr_positions": "IBKR_POSITIONS",
             "ibkr_account_summary": "IBKR_ACCOUNT_SUMMARY",
         }.get(family, symbol.upper())
     print(f"# {display_object} {family} via {label}  ({len(records)} claims)")
-    print(f"{'metric':<22}{'value':>20}  {'unit':<12}{'period':<12}{'tier'}")
+    print(f"{'metric':<22}{'value':>20}  {'unit':<16}{'period':<12}{'tier'}")
     for r in records:
         tier = f"{r.posture.claim_type}/{r.posture.authority_level}"
         print(f"{r.metric:<22}{_fmt(r.value):>20}  {r.unit:<12}{r.period:<12}{tier}")
@@ -385,21 +498,39 @@ def _do_fetch(args) -> int:
     if args.no_emit:
         return 0
 
+    endpoint_symbol = display_object if family.startswith(("hithink_", "cninfo_")) else symbol.upper()
     endpoint = endpoint_tmpl.format(
-        symbol=symbol.upper(),
+        symbol=endpoint_symbol,
+        thscode=endpoint_symbol,
         cik10="<cik>",
         series_id=symbol,
         **_local_endpoint_params(family),
     )
-    private_provider = family.startswith("ibkr_") or family.startswith("futu_")
-    ingestion_route = "authorized_provider" if private_provider else "public_on_demand"
-    must_refresh_if = (
-        "new broker snapshot, session reconnect, entitlement change, or position/account change"
-        if private_provider else ""
+    private_provider = family.startswith(("ibkr_", "futu_"))
+    vendor_provider = family.startswith("hithink_")
+    ingestion_route = (
+        "authorized_provider" if private_provider or vendor_provider else "public_on_demand"
     )
+    if private_provider:
+        must_refresh_if = (
+            "new broker snapshot, session reconnect, entitlement change, "
+            "or position/account change"
+        )
+    elif vendor_provider:
+        must_refresh_if = (
+            "new vendor snapshot, entitlement change, or a superseding issuer filing "
+            "(cross-check L1/L2 disclosure before durable use)"
+        )
+    elif family.startswith("cninfo_"):
+        must_refresh_if = (
+            "new or amended issuer announcement, or the next periodic-report window "
+            "(annual/Q1 by Apr 30, interim by Aug 31, Q3 by Oct 31)"
+        )
+    else:
+        must_refresh_if = ""
     result = emit_bundle(
         records, out_dir=args.out, research_object=display_object,
-        market_scope=args.market_scope, endpoint=endpoint,
+        market_scope=market_scope, endpoint=endpoint,
         params=f"symbol={display_object}", series=res.series,
         ingestion_route=ingestion_route, must_refresh_if=must_refresh_if,
     )
@@ -413,9 +544,18 @@ def _do_fetch(args) -> int:
 
 
 def _effective_fetch_family(family: str) -> str:
-    if family == "market_price" and _default_market_provider() == "futu_opend":
-        return "futu_market_price"
+    if family == "market_price":
+        provider = _default_market_provider()
+        if provider == "futu_opend":
+            return "futu_market_price"
+        if provider == "hithink_finance":
+            return "hithink_market_price"
     return family
+
+
+def _default_market_scope(family: str) -> str:
+    """hithink_*/cninfo_* families are A-share only; every other family keeps the US default."""
+    return "CN" if family.startswith(("hithink_", "cninfo_")) else "US"
 
 
 def _default_market_provider() -> str:

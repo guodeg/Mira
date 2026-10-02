@@ -113,6 +113,7 @@ entitlements and local caching. Mira consumes canonical fields such as:
 - `options_surface`
 - `portfolio_position`
 - `macro_series`
+- `issuer_disclosure`
 
 Every adapter must state:
 

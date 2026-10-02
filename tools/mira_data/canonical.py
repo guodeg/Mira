@@ -24,6 +24,11 @@ CANONICAL_FAMILIES = frozenset(
         "options_surface",
         "portfolio_position",
         "macro_series",
+        # The disclosure record itself (announcement/filing identity + event type),
+        # as opposed to the numbers extracted from it. Added for A-share L1 coverage:
+        # 业绩预告/回购/减持/中标/诉讼/调研纪要 are neither statements nor management
+        # claims, so neither company_financials nor transcript_claim fits them.
+        "issuer_disclosure",
     }
 )
 
@@ -104,6 +109,44 @@ POSTURES: dict[str, Posture] = {
         access_method="local_gateway",
         acquisition_mode="authorized_provider",
         latency_class="live",
+    ),
+    # Licensed vendor read through the hithink-finance CLI. Two postures share one
+    # data route but differ by taxonomy bucket: quotes are market pricing, while
+    # vendor-standardized statements are aggregated financial data that cannot
+    # replace issuer/CNINFO disclosure (source-taxonomy.md).
+    "hithink_finance_market": Posture(
+        source_id="hithink_finance_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="market_pricing",
+        evidence_category="market_pricing",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="delayed",
+    ),
+    "hithink_finance_financials": Posture(
+        source_id="hithink_finance_financials_api",
+        source_class="aggregated_financial_data",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="filing_cycle",
+    ),
+    # CNINFO is the disclosure portal designated for mainland listed companies, so a
+    # specific announcement cited with its own identity (secCode + announcementId +
+    # title + disclosure date + PDF URL) is issuer primary disclosure — the same rule
+    # that makes a specific SEC filing L1 while the companyfacts dataset stays L2.
+    "cninfo_disclosure": Posture(
+        source_id="cninfo_announcement_api",
+        source_class="issuer_primary_disclosure",
+        authority_level="L1",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="filing_cycle",
     ),
 }
 

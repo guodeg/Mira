@@ -9,7 +9,7 @@ as_of_date: "{{ YYYY-MM-DD }}"
 mappings:
   - provider_field: "{{ provider_field }}"
     provider_definition: "{{ provider_definition }}"
-    mira_canonical_family: "{{ company_financials | market_price | valuation_snapshot | consensus_estimate | estimate_revision | transcript_claim | ownership_short_interest | options_surface | portfolio_position | macro_series }}"
+    mira_canonical_family: "{{ company_financials | market_price | valuation_snapshot | consensus_estimate | estimate_revision | transcript_claim | ownership_short_interest | options_surface | portfolio_position | macro_series | issuer_disclosure }}"
     mira_field: "{{ mira_field }}"
     unit: "{{ unit }}"
     currency: "{{ currency_or_not_applicable }}"

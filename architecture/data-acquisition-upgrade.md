@@ -92,7 +92,10 @@ no new concepts.
   **zero adapter implementations**; no `urllib`/`requests` anywhere in research code.
 - Canonical families are already enumerated: `market_price`, `company_financials`,
   `valuation_snapshot`, `consensus_estimate`, `estimate_revision`, `transcript_claim`,
-  `ownership_short_interest`, `options_surface`, `portfolio_position`, `macro_series`.
+  `ownership_short_interest`, `options_surface`, `portfolio_position`, `macro_series`,
+  `issuer_disclosure` (added for A-share L1: 公告/业绩预告/回购/减持/中标/诉讼 are neither
+  reported financials nor management claims, so neither `company_financials` nor
+  `transcript_claim` fits them).
 - Evidence-log v1.2 schema (22 cols) and calculation-ledger schema (14 cols) are defined and stable.
 
 ## 3. Constraints To Respect (do not break)
@@ -292,6 +295,41 @@ fetch degrades that row to `data_gap`; a fully failed run exits as
 `source_gap` so routing falls back to the watchlist-note path. Whole-market
 factor screens (SEC frames cross-sections) and non-US / estimates screening
 stay deferred (P4).
+
+**Cash-flow span option — implemented.** Issuers file Q2/Q3 cash flow as 6-/9-month
+year-to-date spans, so `fetch company_financials` defaults to the last clean
+single-quarter span: correct, but able to lag the income statement by two quarters
+(AAPL FY2026 Q3 revenue sitting next to FY2026 Q1 operating cash flow).
+`--cash-flow-span ytd` reads the newest cumulative filing and differences the prior
+cumulative row of the same fiscal year (9M − 6M) into the latest quarter. That
+difference is Mira-computed, so it is emitted as a ledgered `derived_calculation`
+with both spans named in the formula. A difference that is not one quarter wide
+(9M − 3M) is labeled by its own span instead of being passed off as a quarter, and a
+metric with no prior cumulative row stays as filed under an explicit `9M` label.
+Every snapshot claim now records `period_end`, `span_days` and `conversion`, so the
+basis travels with the value; screening exposes `cash_flow_period_end` and
+`revenue_yoy_period` because one screen row combines annual flows with a quarterly
+YoY.
+
+**A-share L1 disclosure channel — implemented.** `python3 -m mira_data fetch
+cninfo_announcements 600519 --since 2026-01-01` reads the CNINFO (巨潮资讯网)
+announcement index — the portal designated for mainland listed-company disclosure — and
+emits one `issuer_disclosure` record per announcement: secCode + announcementId + title +
+Beijing disclosure date + PDF URL, stamped L1 `issuer_primary_disclosure`. **A new
+canonical family was added for this** (the eleventh): 业绩预告/回购/减持/中标/诉讼/调研纪要
+are neither reported financials nor management claims, so neither `company_financials`
+nor `transcript_claim` fits them. The adapter is stdlib-only (two form-POST endpoints
+plus a PDF link) and needs no key, cookie or JS challenge; it absorbs four verified
+traps — a server-capped `pageSize=30`; per-stock queries needing an orgId (one bulk map
+request, because a bare 6-digit code returns zero rows); an invalid category code
+**silently returning the whole market** instead of erroring, so categories are
+whitelisted and the known-bad codes raise; and `announcementTime` being a UTC epoch whose
+date must be read in Asia/Shanghai or it lands a day early. Event tokens come from
+`announcementType`, which is a pipe-delimited **multi-label** code list rather than the
+single opaque code public write-ups describe; it has no public ontology, so only observed
+codes are mapped and everything else degrades to title rules and finally to `other`.
+Dedupe keys on (secCode, Beijing date, normalized title): the same PDF can be indexed
+twice, while the same title on different dates is two real announcements.
 
 **P2 compute engine — implemented.** `just data-technical AAPL` (benchmark
 defaults to SPY) consumes the `market_price` series and computes the daily subset

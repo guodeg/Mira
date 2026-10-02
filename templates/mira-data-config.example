@@ -67,6 +67,21 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_FUTU_HIST_KTYPE=K_DAY
 # MIRA_FUTU_HIST_AUTYPE=QFQ
 
+# --- Optional local Tonghuashun (hithink-finance) A-share connection --------------
+# Licensed A-share vendor data read on demand through the hithink-finance CLI
+# (`hithink-finance auth login` stores the API key in the CLI credential store;
+# never copy the key into this file, tracked files or logs). Only the CLI
+# location and timeout belong here. Raw vendor payloads stay in private/ state.
+# MIRA_HITHINK_BIN=hithink-finance
+# MIRA_HITHINK_TIMEOUT=60
+
+# --- CNINFO A-share disclosure portal (no key, no cookie) ------------------
+# Public statutory disclosure index: on-demand single-name reads only, never a
+# bulk backfill (DATA_POLICY). Tuning is limited to pacing and the read cap.
+# MIRA_CNINFO_TIMEOUT=25
+# MIRA_CNINFO_PAGE_SLEEP=0.4
+# MIRA_CNINFO_MAX_ITEMS=100
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

@@ -177,12 +177,14 @@ def _screen_one(sym: str, cik: Optional[str], criteria: dict, as_of: str,
             f"last_close({price_date}) * shares_outstanding({shares['end']})", "sec+yahoo")
 
     fy, ocf, capex = _common_annual(obs["operating_cash_flow"], obs["capex"])
+    cash_flow_period_end = "source_gap"
     if (ocf is not None and capex is not None and metrics.get("market_cap_usd")
             and _fresh(ocf, as_of)):
         metrics["fcf_yield"] = (ocf["val"] - capex["val"]) / metrics["market_cap_usd"]
         formulas["fcf_yield"] = (
             f"(operating_cash_flow(FY{fy}) - capex(FY{fy})) / market_cap_usd", "sec+yahoo")
         basis_bits.append(f"flows FY{fy}")
+        cash_flow_period_end = ocf.get("end") or "source_gap"
 
     debt = _latest_instant(obs["long_term_debt"])
     equity = _latest_instant(obs["stockholders_equity"])
@@ -199,12 +201,16 @@ def _screen_one(sym: str, cik: Optional[str], criteria: dict, as_of: str,
         formulas["net_margin"] = (f"net_income(FY{fy_m}) / revenue(FY{fy_m})", "sec")
 
     yoy = _yoy(obs["revenue"])
+    revenue_yoy_period = "source_gap"
     if yoy is not None and _fresh(yoy[1], as_of):
         value, latest, base = yoy
         metrics["revenue_yoy"] = value
         formulas["revenue_yoy"] = (
             f"revenue(FY{latest.get('fy')} {latest.get('fp')}) / "
             f"revenue(FY{base.get('fy')} {base.get('fp')}) - 1", "sec")
+        revenue_yoy_period = (f"FY{latest.get('fy')} {latest.get('fp')} "
+                              f"vs FY{base.get('fy')} {base.get('fp')}")
+        basis_bits.append(f"yoy {revenue_yoy_period}")
 
     if price_date:
         basis_bits.append(f"price {price_date}")
@@ -214,7 +220,9 @@ def _screen_one(sym: str, cik: Optional[str], criteria: dict, as_of: str,
 
     row = _row(sym, as_of, market_scope, status, criteria, metrics,
                basis="; ".join(basis_bits) or "source_gap",
-               price_as_of=price_date or "source_gap", gaps=gaps)
+               price_as_of=price_date or "source_gap", gaps=gaps,
+               cash_flow_period_end=cash_flow_period_end,
+               revenue_yoy_period=revenue_yoy_period)
     recs = _derived_records(sym, as_of, market_scope, metrics, formulas) if status == "pass" else []
     return row, recs
 
@@ -238,7 +246,8 @@ def _evaluate(criteria: dict, metrics: dict) -> tuple[str, list]:
 
 
 def _row(sym, as_of, market_scope, status, criteria, metrics, *, basis,
-         price_as_of, gaps, notes="") -> dict:
+         price_as_of, gaps, notes="", cash_flow_period_end="source_gap",
+         revenue_yoy_period="source_gap") -> dict:
     row = {
         "screened_date": as_of,
         "ticker": sym,
@@ -246,6 +255,11 @@ def _row(sym, as_of, market_scope, status, criteria, metrics, *, basis,
         "screen_status": status,
         "criteria": _criteria_label(criteria),
         "fundamentals_basis": basis,
+        # Period basis per metric family: a row mixes annual flows (fcf_yield,
+        # net_margin) with a quarterly YoY, so each basis is named explicitly
+        # instead of hiding the mix behind one "fundamentals" label.
+        "cash_flow_period_end": cash_flow_period_end,
+        "revenue_yoy_period": revenue_yoy_period,
         "price_as_of": price_as_of,
         "data_gaps": ";".join(dict.fromkeys(gaps)) or "none",
         "upstream_sources": f"sec_companyfacts_api:{sym};yahoo_chart_api_v8:{sym}",

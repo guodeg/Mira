@@ -77,6 +77,37 @@ SOURCE_POLICY = {
         redistribution_allowed="no", readiness_impact="supports_working_view",
         freshness_status="current", confidence="medium",
     ),
+    # Licensed A-share vendor read through a locally authenticated CLI. The
+    # licence tier is not verifiable from the repo, so raw payloads stay private
+    # and redistribution stays unknown rather than assumed.
+    "hithink_finance_api": dict(
+        provider="Tonghuashun (Hithink RoyalFlush) via hithink-finance CLI", speaker="market",
+        license_scope="vendor_api_key_terms_unverified", storage_scope="private",
+        redistribution_allowed="unknown", readiness_impact="supports_working_view",
+        freshness_status="current", confidence="medium", source_language="zh-CN",
+        translation_basis="mira_translation",
+    ),
+    "hithink_finance_financials_api": dict(
+        provider="Tonghuashun (Hithink RoyalFlush) via hithink-finance CLI",
+        speaker="vendor_aggregator",
+        license_scope="vendor_api_key_terms_unverified", storage_scope="private",
+        redistribution_allowed="unknown", readiness_impact="supports_working_view",
+        freshness_status="acceptable_for_period", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    # Statutory issuer disclosure read from the designated A-share disclosure
+    # portal. L1 identity (code + announcement id + title + date + PDF URL) can
+    # support a durable conclusion; the filing's own numbers still need extraction
+    # or a second source. Raw payloads stay private and are not redistributed.
+    "cninfo_announcement_api": dict(
+        provider="CNINFO (巨潮资讯网, designated A-share disclosure portal)",
+        speaker="issuer",
+        license_scope="public_statutory_disclosure_via_licensed_portal",
+        storage_scope="private", redistribution_allowed="derived_only",
+        readiness_impact="supports_durable_conclusion",
+        freshness_status="current", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(
@@ -165,7 +196,8 @@ def emit_bundle(
 
 def _record_field_coverage(records: list[CanonicalRecord]) -> list[dict]:
     return [
-        {"field": r.metric, "definition": r.provenance.get("tag", r.metric),
+        {"field": r.metric,
+         "definition": r.provenance.get("tag") or r.provenance.get("vendor_field") or r.metric,
          "unit": r.unit, "currency": r.currency or "not_applicable",
          "period": r.period, "canonical_family": r.family}
         for r in records
@@ -191,6 +223,11 @@ def _evidence_row(r: CanonicalRecord, policy, used_by_agent, used_by_skill) -> d
         # ledger carries the reproducibility; the row points to its ledger via source_id.
         ev_source_id = _calc_id(r)
         notes = f"Formula: {r.formula}" if r.formula else "Formula: derived"
+        # A derived value is only as good as the periods behind it: keep the
+        # span/conversion trail on the row, not just in the ledger.
+        basis = _provenance_note(r)
+        if basis != "reported metric":
+            notes = f"{notes}; {basis}"
         upstream = r.upstream_sources or r.posture.source_id
     else:
         ev_source_id = r.posture.source_id
@@ -217,8 +254,8 @@ def _evidence_row(r: CanonicalRecord, policy, used_by_agent, used_by_skill) -> d
         "conflict_status": "not_checked",
         "treatment": "use_normally",
         "readiness_impact": policy["readiness_impact"],
-        "source_language": "en",
-        "translation_basis": "not_translated",
+        "source_language": policy.get("source_language", "en"),
+        "translation_basis": policy.get("translation_basis", "not_translated"),
     }
 
 
@@ -328,9 +365,23 @@ def _write_manifest(path, *, records, ingestion_id, ingestion_route, research_ob
         fh.write("\n")
 
 
+# Provenance keys already visible in the row's own columns (claim text, url_or_path,
+# source_date) or too raw to repeat; everything else is the audit trail.
+_NOTE_OMIT = {"announcementId", "adjunctUrl", "adjunctType", "announcement_time_bj"}
+
+
 def _provenance_note(r: CanonicalRecord) -> str:
-    p = r.provenance
-    bits = [f"{k}={p[k]}" for k in ("tag", "form", "fy", "fp", "accn") if p.get(k)]
+    """Serialise provenance into the evidence row's notes.
+
+    Serialising the whole map (rather than a per-adapter key list) is what keeps a
+    claim's 口径 auditable: a reported metric must record the unit, period and
+    source identity it was read under, and adapters differ in what that means
+    (SEC taxonomy tag, vendor field label, announcement type code, span basis).
+    """
+    bits = [
+        f"{key}={value}" for key, value in r.provenance.items()
+        if value not in (None, "") and key not in _NOTE_OMIT
+    ]
     return "; ".join(bits) if bits else "reported metric"
 
 

@@ -11,6 +11,7 @@ import http.client
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zlib
 
@@ -39,13 +40,53 @@ def get(url: str, *, headers: dict | None = None, timeout: int = DEFAULT_TIMEOUT
     Retries on 429 and 5xx; raises :class:`FetchError` on a hard failure so the
     caller can degrade gracefully.
     """
+    hdrs = _base_headers(headers)
+    return _send(lambda: urllib.request.Request(url, headers=hdrs), url, timeout, retries, backoff)
+
+
+def get_json(url: str, **kwargs) -> dict:
+    """GET ``url`` and parse JSON, raising :class:`FetchError` on bad payloads."""
+    return _as_json(get(url, **kwargs), url)
+
+
+def post_form_json(url: str, data: dict, *, headers: dict | None = None,
+                   timeout: int = DEFAULT_TIMEOUT, retries: int = 2,
+                   backoff: float = 1.5) -> dict:
+    """POST an ``x-www-form-urlencoded`` body and parse JSON.
+
+    Same retry and failure policy as :func:`get`. Some portals only expose an
+    AJAX endpoint rather than a documentable REST API (CNINFO's announcement
+    query is one), so the form POST has to be a first-class path rather than a
+    special case inside an adapter.
+    """
+    hdrs = _base_headers(headers)
+    hdrs.setdefault("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+    body = urllib.parse.urlencode(data).encode("utf-8")
+    raw = _send(lambda: urllib.request.Request(url, data=body, headers=hdrs),
+                url, timeout, retries, backoff)
+    return _as_json(raw, url)
+
+
+def _base_headers(headers: dict | None) -> dict:
     hdrs = {"User-Agent": config.contact_ua()[0], "Accept-Encoding": "gzip, deflate"}
     if headers:
         hdrs.update(headers)
+    return hdrs
 
+
+def _as_json(raw: bytes, url: str) -> dict:
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        # A JS anti-bot challenge or HTML error page lands here (e.g. Stooq).
+        raise FetchError(f"non-JSON response from {url}: {exc}", url=url) from exc
+
+
+def _send(make_request, url: str, timeout: int, retries: int, backoff: float) -> bytes:
+    """Issue ``make_request()`` with the shared retry policy; return raw bytes."""
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
-        req = urllib.request.Request(url, headers=hdrs)
+        req = make_request()
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 try:
@@ -79,16 +120,6 @@ def get(url: str, *, headers: dict | None = None, timeout: int = DEFAULT_TIMEOUT
             raise FetchError(f"incomplete or invalid response from {url}: {exc}", url=url) from exc
 
     raise FetchError(f"exhausted retries for {url}: {last_exc}", url=url)
-
-
-def get_json(url: str, **kwargs) -> dict:
-    """GET ``url`` and parse JSON, raising :class:`FetchError` on bad payloads."""
-    raw = get(url, **kwargs)
-    try:
-        return json.loads(raw.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError) as exc:
-        # A JS anti-bot challenge or HTML error page lands here (e.g. Stooq).
-        raise FetchError(f"non-JSON response from {url}: {exc}", url=url) from exc
 
 
 def _read_body(resp) -> bytes:

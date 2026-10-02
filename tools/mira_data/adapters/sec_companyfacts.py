@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,12 @@ SEC_FACT_BACKOFF = 0.5
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TICKER_CACHE_PATH = _REPO_ROOT / "local" / "mira-data-cache" / "sec-ticker-cik-map.json"
 _TICKER_CACHE_MAX_AGE = _dt.timedelta(days=7)
+
+# Cash-flow tags are the ones issuers file cumulatively: a Q2/Q3 10-Q carries the
+# 6-/9-month year-to-date figure, not a clean quarter. They are therefore the
+# metrics the ``cash_flow_span`` option applies to.
+CASH_FLOW_METRICS = frozenset({"operating_cash_flow", "capex"})
+CASH_FLOW_SPANS = ("quarter", "ytd")
 
 
 def _require_contact() -> None:
@@ -204,8 +211,25 @@ def fetch_company_financials(
     as_of: Optional[str] = None,
     market_scope: str = "US",
     cik: Optional[str] = None,
+    cash_flow_span: str = "quarter",
 ) -> FetchResult:
-    """Fetch a curated financial snapshot as canonical reported metrics."""
+    """Fetch a curated financial snapshot as canonical reported metrics.
+
+    ``cash_flow_span`` controls the cash-flow metrics only (``operating_cash_flow``,
+    ``capex``), because those are the tags issuers file cumulatively:
+
+    - ``"quarter"`` (default): latest clean single-quarter span. Issuers that only
+      file Q2/Q3 cash flow as 6-/9-month YTD leave this at the last clean quarter,
+      so it can lag the income statement by two quarters — the mix is recorded in
+      each claim's ``period`` and ``conversion`` provenance, never hidden.
+    - ``"ytd"``: use the newest cumulative fiscal-year-to-date filing, reconciled to
+      a single quarter by subtracting the previous cumulative observation of the
+      same fiscal year (``9M - 6M``). That delta is Mira-computed, so it is emitted
+      as a ledgered ``derived_calculation``. When no prior cumulative observation
+      exists the value is reported as filed with an explicit ``{n}M`` period label.
+    """
+    if cash_flow_span not in CASH_FLOW_SPANS:
+        raise ValueError(f"unknown cash_flow_span {cash_flow_span!r}; use one of {CASH_FLOW_SPANS}")
     as_of = as_of or _dt.date.today().isoformat()
     cik10, facts, url = load_facts(ticker, cik)
     posture = POSTURES["sec_companyfacts"]
@@ -215,9 +239,11 @@ def fetch_company_financials(
         tagblock = _first_present(facts.get(taxonomy, {}), candidates)
         if tagblock is None:
             continue
-        unit, obs = _select_observation(tagblock, kind)
-        if obs is None:
+        selection = _select_metric_observation(
+            tagblock, kind, metric, cash_flow_span=cash_flow_span)
+        if selection is None:
             continue
+        obs = selection.obs
         records.append(
             CanonicalRecord(
                 family="company_financials",
@@ -225,14 +251,19 @@ def fetch_company_financials(
                 market_scope=market_scope,
                 metric=metric,
                 value=obs["val"],
-                unit=unit,
-                currency="USD" if unit == "USD" else None,
-                period=_period_label(obs),
+                unit=selection.unit,
+                currency="USD" if selection.unit == "USD" else None,
+                period=selection.period,
                 period_type="fiscal_period",
                 as_of_date=as_of,
                 source_date=obs.get("filed", as_of),
                 posture=posture,
                 url_or_path=url,
+                derived=selection.derived,
+                upstream_sources=f"{posture.source_id}:{ticker.upper()}" if selection.derived else "",
+                formula=selection.formula,
+                cross_check=("cumulative companyfacts rows differenced within one fiscal year"
+                             if selection.derived else ""),
                 provenance={
                     "cik": cik10,
                     "tag": obs["_tag"],
@@ -242,12 +273,136 @@ def fetch_company_financials(
                     "form": obs.get("form"),
                     "accn": obs.get("accn"),
                     "period_end": obs.get("end"),
+                    "period_start": obs.get("start"),
+                    "span_days": selection.span_days,
+                    "conversion": selection.conversion,
+                    "prior_period_end": selection.prior_end,
                 },
             )
         )
     if not records:
         raise net.FetchError(f"no curated facts extracted for {ticker} ({cik10})")
     return FetchResult(records)
+
+
+@dataclass(frozen=True)
+class Selection:
+    """How one curated metric was resolved from companyfacts, and on what basis."""
+
+    unit: str
+    obs: dict
+    period: str
+    conversion: str            # single_quarter | annual | point_in_time | ytd_delta | ytd_as_filed
+    span_days: Optional[int] = None
+    derived: bool = False
+    formula: str = ""
+    prior_end: str = ""
+
+
+def _select_metric_observation(
+    tagblock: dict, kind: str, metric: str, *, cash_flow_span: str = "quarter",
+) -> Optional[Selection]:
+    """Resolve the observation for one metric under the requested span policy."""
+    if kind == "duration" and cash_flow_span == "ytd" and metric in CASH_FLOW_METRICS:
+        return _select_ytd_observation(tagblock, metric)
+    unit, obs = _select_observation(tagblock, kind)
+    if obs is None:
+        return None
+    span = _span_days(obs.get("start"), obs.get("end"))
+    return Selection(
+        unit=unit, obs=obs, period=_period_label(obs),
+        conversion=_conversion_label(kind, span), span_days=span,
+    )
+
+
+def _select_ytd_observation(tagblock: dict, metric: str) -> Optional[Selection]:
+    """Newest cumulative cash-flow filing, reconciled to a single quarter.
+
+    Cumulative rows of one fiscal year share the same period ``start``, so the
+    prior observation is the one with the same fiscal year and start but an
+    earlier end (9M -> 6M -> 3M). Differencing them yields the latest quarter.
+    """
+    candidates = _cumulative_candidates(tagblock)
+    if not candidates:
+        return None
+    unit, latest_row = max(
+        candidates,
+        key=lambda c: (c[1].get("end", ""), c[1].get("filed", "")),
+    )
+    latest = dict(latest_row)
+    latest["_tag"] = tagblock["_tag"]
+    latest_span = _span_days(latest.get("start"), latest.get("end"))
+    prior = _prior_cumulative(candidates, latest)
+    if prior is None or latest.get("val") is None or prior.get("val") is None:
+        return Selection(
+            unit=unit, obs=latest, period=_period_label(latest),
+            conversion="ytd_as_filed", span_days=latest_span,
+        )
+
+    delta_span = _span_days(prior.get("end"), latest.get("end"))
+    reconciled = dict(latest)
+    reconciled["val"] = latest["val"] - prior["val"]
+    # Only a one-quarter difference is a quarter. Differencing a 9M row against a
+    # 3M row yields a 6M span, which must be labeled as such rather than passed
+    # off as a single quarter.
+    if delta_span is not None and _is_quarter(delta_span):
+        period, conversion = _quarter_label(latest, delta_span), "ytd_delta"
+    else:
+        period, conversion = _span_label(latest, delta_span), "ytd_delta_span"
+    return Selection(
+        unit=unit, obs=reconciled, period=period,
+        conversion=conversion, span_days=delta_span, derived=True,
+        formula=(f"{metric}({_period_label(latest)}) - {metric}({_period_label(prior)}) "
+                 f"[cumulative companyfacts rows differenced to the {period} span]"),
+        prior_end=prior.get("end", ""),
+    )
+
+
+def _cumulative_candidates(tagblock: dict) -> list[tuple[str, dict]]:
+    """Rows that look like a fiscal-period flow: 3M / 6M / 9M / 12M spans."""
+    out: list[tuple[str, dict]] = []
+    for unit, rows in tagblock["units"].items():
+        for row in rows:
+            if "end" not in row or "val" not in row:
+                continue
+            span = _span_days(row.get("start"), row.get("end"))
+            if span is not None and 80 <= span <= 380:
+                out.append((unit, row))
+    return out
+
+
+def _prior_cumulative(candidates: list[tuple[str, dict]], latest: dict) -> Optional[dict]:
+    """The cumulative row one quarter before ``latest``, when it exists.
+
+    Preference order matters: a one-quarter difference is a quarter, while
+    differencing against a much earlier row silently widens the span (9M - 3M is
+    six months). Candidates are therefore ranked by "gives a quarter first", then
+    by recency.
+    """
+    prior_pool = [
+        row for _unit, row in candidates
+        if row.get("fy") == latest.get("fy")
+        and row.get("start") == latest.get("start")
+        and row.get("end", "") < latest.get("end", "")
+    ]
+    if not prior_pool:
+        return None
+    prior_pool.sort(key=lambda row: (row.get("end", ""), row.get("filed", "")), reverse=True)
+    for row in prior_pool:
+        delta = _span_days(row.get("end"), latest.get("end"))
+        if delta is not None and _is_quarter(delta):
+            return row
+    return prior_pool[0]
+
+
+def _conversion_label(kind: str, span: Optional[int]) -> str:
+    if kind != "duration":
+        return "point_in_time"
+    if span is not None and _is_quarter(span):
+        return "single_quarter"
+    if span is not None and _is_annual(span):
+        return "annual"
+    return "unknown"
 
 
 def _first_present(taxonomy_block: dict, candidates: list[str]) -> Optional[dict]:
@@ -328,9 +483,42 @@ def _is_annual(span: int) -> bool:
 
 
 def _period_label(obs: dict) -> str:
+    """Label a claim by its real span — a cumulative value is never called a quarter."""
     fy, fp = obs.get("fy"), obs.get("fp")
+    span = _span_days(obs.get("start"), obs.get("end"))
+    if span is not None and _is_cumulative_ytd(span):
+        return _span_label(obs, span)
     if fy and fp == "FY":
         return f"FY{fy}"
     if fy and fp:
         return f"FY{fy} {fp}"
     return obs.get("end", "unknown")
+
+
+def _span_label(obs: dict, span: Optional[int]) -> str:
+    """Label a value by its own span length, e.g. ``FY2026 9M``."""
+    fy = obs.get("fy")
+    if fy and span:
+        return f"FY{fy} {_span_months(span)}M"
+    return obs.get("end", "unknown")
+
+
+def _quarter_label(obs: dict, delta_span: Optional[int]) -> str:
+    """Label a differenced quarter: the issuer fiscal period when known."""
+    fy, fp = obs.get("fy"), obs.get("fp")
+    if fy and fp and fp != "FY":
+        return f"FY{fy} {fp}"
+    if fy and delta_span:
+        return f"FY{fy} {_span_months(delta_span)}M"
+    return obs.get("end", "unknown")
+
+
+def _is_cumulative_ytd(span: int) -> bool:
+    """A 6-/9-month year-to-date span: cumulative, neither a quarter nor a year."""
+    return 150 <= span <= 330
+
+
+def _span_months(span: Optional[int]) -> Optional[int]:
+    if span is None:
+        return None
+    return max(1, round(span / 30.4375))

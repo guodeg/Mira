@@ -22,8 +22,11 @@ PY_COMPILE_TARGETS = [
     "scripts/validate_repo.py",
     "scripts/generate_case_manifests.py",
     "scripts/migrate_evidence_log_v1_to_v1_1.py",
+    "scripts/test_mira_data_cninfo.py",
     "scripts/test_mira_data_futu.py",
+    "scripts/test_mira_data_hithink.py",
     "scripts/test_mira_data_net.py",
+    "scripts/test_mira_data_sec.py",
     "scripts/test_repo_validation_contracts.py",
     "scripts/validate_release.py",
 ]
@@ -75,8 +78,11 @@ def build_checks(args: argparse.Namespace) -> list[tuple[str, list[str], set[int
     checks.extend(
         [
             ("py_compile", [sys.executable, "-m", "py_compile", *PY_COMPILE_TARGETS], {0}, True),
+            ("mira_data_cninfo_tests", [sys.executable, "scripts/test_mira_data_cninfo.py"], {0}, True),
             ("mira_data_futu_tests", [sys.executable, "scripts/test_mira_data_futu.py"], {0}, True),
+            ("mira_data_hithink_tests", [sys.executable, "scripts/test_mira_data_hithink.py"], {0}, True),
             ("mira_data_net_tests", [sys.executable, "scripts/test_mira_data_net.py"], {0}, True),
+            ("mira_data_sec_tests", [sys.executable, "scripts/test_mira_data_sec.py"], {0}, True),
             ("repo_validation_contract_tests", [sys.executable, "scripts/test_repo_validation_contracts.py"], {0}, True),
             ("repo_validation", [sys.executable, "scripts/validate_repo.py"], {0}, True),
         ]

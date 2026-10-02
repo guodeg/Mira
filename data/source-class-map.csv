@@ -84,3 +84,6 @@ krx_kind_disclosure_system,regulatory_and_exchange,L2 official exchange disclosu
 esma_issuer_disclosure_hub,regulatory_and_exchange,L2 EU issuer-disclosure policy hub,reviewed,"Regulatory context and routing source, not issuer-specific filing evidence."
 ec_transparency_oam_directory,regulatory_and_exchange,L2 EU transparency and OAM routing source,reviewed,"Use to route issuer-specific evidence to national OAMs."
 euronext_live_markets,market_price_and_trading,L5 exchange market data page,reviewed,"Delayed quote and listing context for Euronext venues."
+hithink_finance_api,market_price_and_trading,L5 A-share market pricing via licensed hithink-finance vendor API,reviewed,"Market pricing and price history only; not a fundamentals fact source."
+hithink_finance_financials_api,aggregated_financial_data,L5 vendor-standardized A-share statements (aggregated secondary data),reviewed,"Cross-check against issuer/CNINFO/SSE/SZSE filings before durable conclusions."
+cninfo_announcement_api,issuer_primary_disclosure,L1 issuer announcement cited with secCode announcementId title date and PDF URL,reviewed,"Disclosure identity and event type; numbers inside the filing still need extraction or a separate L1/L2 source."
