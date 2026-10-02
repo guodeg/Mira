@@ -118,6 +118,25 @@ SOURCE_POLICY = {
         freshness_status="current", confidence="medium",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Official exchange market statistics. Public and citable, but the raw daily file is
+    # not mirrored into tracked state and the redistributability of a bulk extract is
+    # left as derived-only rather than assumed.
+    "sse_margin_api": dict(
+        provider="Shanghai Stock Exchange margin-financing statistics",
+        speaker="exchange",
+        license_scope="public_official_market_statistics", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    "szse_margin_api": dict(
+        provider="Shenzhen Stock Exchange margin-financing statistics",
+        speaker="exchange",
+        license_scope="public_official_market_statistics", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

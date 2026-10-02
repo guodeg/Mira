@@ -88,3 +88,5 @@ hithink_finance_api,market_price_and_trading,L5 A-share market pricing via licen
 hithink_finance_financials_api,aggregated_financial_data,L5 vendor-standardized A-share statements (aggregated secondary data),reviewed,"Cross-check against issuer/CNINFO/SSE/SZSE filings before durable conclusions."
 cninfo_announcement_api,issuer_primary_disclosure,L1 issuer announcement cited with secCode announcementId title date and PDF URL,reviewed,"Disclosure identity and event type; numbers inside the filing still need extraction or a separate L1/L2 source."
 eastmoney_consensus_api,consensus_and_estimates,L5 aggregated sell-side consensus rating and target-price table,reviewed,"Expectation baseline only; never anchor a reported-metric conclusion on it."
+sse_margin_api,regulatory_and_exchange,L2 exchange-published margin financing and securities lending statistics,reviewed,"Official exchange market-structure data; 元 and 股 as published."
+szse_margin_api,regulatory_and_exchange,L2 exchange-published margin financing and securities lending statistics,reviewed,"Official exchange market-structure data; 亿元 and 万股 normalised to 元 and 股."

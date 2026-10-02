@@ -162,6 +162,29 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Exchange-published margin statistics: the exchanges are the controlling source
+    # for their own market-structure data, so this is genuine L2 (unlike the 龙虎榜 /
+    # 大宗 / 北向 paths that every open-source library reaches via an aggregator).
+    "sse_margin": Posture(
+        source_id="sse_margin_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "szse_margin": Posture(
+        source_id="szse_margin_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

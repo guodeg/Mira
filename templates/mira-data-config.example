@@ -82,6 +82,15 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_CNINFO_PAGE_SLEEP=0.4
 # MIRA_CNINFO_MAX_ITEMS=100
 
+# --- SSE / SZSE margin (融资融券) exchange endpoints (no key) ---------------
+# Daily publication, and the two exchanges do not always publish the same day: the
+# adapter walks back up to MAX_BACKFILL days and records both the requested and the
+# used date. SZSE has no per-name filter and returns the whole market (2105 rows)
+# code-sorted, so a single-name read binary-searches the page range, capped by
+# MAX_SEARCH_PAGES requests.
+# MIRA_MARGIN_MAX_BACKFILL_DAYS=14
+# MIRA_MARGIN_MAX_SEARCH_PAGES=12
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

@@ -13,17 +13,24 @@ import argparse
 import sys
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bls, cninfo_disclosure, eastmoney_consensus, futu_opend,
-                       hithink_finance, ibkr_gateway, sec_companyfacts, yahoo_chart)
+from .adapters import (bls, cninfo_disclosure, eastmoney_consensus, exchange_margin,
+                       futu_opend, hithink_finance, ibkr_gateway, sec_companyfacts,
+                       yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
-_A_SHARE_FAMILIES = ("consensus_estimate",)
+_A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market")
+# Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
+_THSCODE_FAMILIES = ("consensus_estimate", "margin_balance")
 
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
+
+
+def _is_thscode_family(family: str) -> bool:
+    return family.startswith(_A_SHARE_PREFIXES) or family in _THSCODE_FAMILIES
 
 FETCHERS = {
     "company_financials": ("SEC companyfacts", sec_companyfacts.fetch_company_financials,
@@ -65,6 +72,12 @@ FETCHERS = {
     "consensus_estimate": ("Eastmoney sell-side consensus (L5 expectation baseline)",
                            eastmoney_consensus.fetch_consensus,
                            eastmoney_consensus.ENDPOINT),
+    "margin_balance": ("SSE/SZSE margin financing & securities lending (L2 exchange data)",
+                       exchange_margin.fetch_margin_balance,
+                       exchange_margin.SSE_ENDPOINT),
+    "margin_market": ("SSE/SZSE market-wide margin aggregates (L2 exchange data)",
+                      exchange_margin.fetch_margin_market,
+                      exchange_margin.SSE_ENDPOINT),
 }
 
 
@@ -90,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="cninfo_announcements only: server-side announcement category")
     f.add_argument("--max-items", type=int, default=None,
                    help="cninfo_announcements only: cap on announcements read")
+    f.add_argument("--date", default=None,
+                   help="margin_* families only: trade date YYYY-MM-DD "
+                        "(defaults to the latest published day)")
     f.add_argument("--no-emit", action="store_true", help="print records only, don't write files")
 
     t = sub.add_parser("technical", help="compute technical context for a symbol")
@@ -440,6 +456,7 @@ def _do_config(_args) -> int:
         "MIRA_FUTU_CURRENCY",
         "MIRA_HITHINK_BIN", "MIRA_HITHINK_TIMEOUT",
         "MIRA_CNINFO_TIMEOUT", "MIRA_CNINFO_PAGE_SLEEP", "MIRA_CNINFO_MAX_ITEMS",
+        "MIRA_MARGIN_MAX_BACKFILL_DAYS", "MIRA_MARGIN_MAX_SEARCH_PAGES",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -466,9 +483,15 @@ def _do_fetch(args) -> int:
         print(f"error: --since/--until/--category/--max-items apply to the "
               f"cninfo_announcements family, not {family}", file=sys.stderr)
         return 2
+    if args.date and family not in {"margin_balance", "margin_market"}:
+        print(f"error: --date applies to the margin_balance/margin_market families, "
+              f"not {family}", file=sys.stderr)
+        return 2
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
         symbol = config.get("MIRA_IBKR_ACCOUNT", "ALL") or "ALL"
+    elif family == "margin_market" and not symbol:
+        symbol = "BOTH"
     elif not symbol:
         print(f"error: fetch {args.family} requires a symbol", file=sys.stderr)
         return 2
@@ -478,6 +501,8 @@ def _do_fetch(args) -> int:
     elif family == "cninfo_announcements":
         kwargs.update(since=args.since, until=args.until,
                       category=args.category or "", max_items=args.max_items)
+    elif family in {"margin_balance", "margin_market"}:
+        kwargs["date"] = args.date
     try:
         res = fetcher(symbol, as_of=args.as_of, market_scope=market_scope, **kwargs)
     except net.FetchError as exc:
@@ -487,7 +512,9 @@ def _do_fetch(args) -> int:
     records = res.records
     if family.startswith("futu_"):
         display_object = _display_futu_symbol(symbol)
-    elif _is_a_share_family(family):
+    elif family == "margin_market":
+        display_object = f"{symbol.upper()}_MARGIN"
+    elif _is_thscode_family(family):
         try:
             display_object = hithink_finance.resolve_thscode(symbol)
         except net.FetchError as exc:
@@ -509,7 +536,8 @@ def _do_fetch(args) -> int:
     if args.no_emit:
         return 0
 
-    endpoint_symbol = display_object if _is_a_share_family(family) else symbol.upper()
+    endpoint_symbol = (display_object if _is_thscode_family(family) or family == "margin_market"
+                       else symbol.upper())
     endpoint = endpoint_tmpl.format(
         symbol=endpoint_symbol,
         thscode=endpoint_symbol,
@@ -541,6 +569,11 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "analyst estimate revision, next earnings or guidance update, and before any "
             "expectation-delta claim (the vendor payload carries no as-of timestamp)"
+        )
+    elif family in {"margin_balance", "margin_market"}:
+        must_refresh_if = (
+            "next trading day's publication; the exchanges publish after the close and can "
+            "lag by a day or more, so re-read before using the level as current positioning"
         )
     else:
         must_refresh_if = ""
