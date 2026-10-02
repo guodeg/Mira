@@ -148,6 +148,20 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="filing_cycle",
     ),
+    # Sell-side expectations relayed by a portal: L5 consensus, never an issuer fact.
+    # claim_type=forecast is deliberate for the whole endpoint — the EPS estimates,
+    # the six-month rating tallies and the target-price range are all analyst
+    # expectations, which claim-taxonomy.md says may describe expectation but not fact.
+    "eastmoney_consensus": Posture(
+        source_id="eastmoney_consensus_api",
+        source_class="consensus_and_estimates",
+        authority_level="L5",
+        claim_type="forecast",
+        evidence_category="estimate",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

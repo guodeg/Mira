@@ -13,9 +13,17 @@ import argparse
 import sys
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bls, cninfo_disclosure, futu_opend, hithink_finance,
-                       ibkr_gateway, sec_companyfacts, yahoo_chart)
+from .adapters import (bls, cninfo_disclosure, eastmoney_consensus, futu_opend,
+                       hithink_finance, ibkr_gateway, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
+
+# Families that are mainland-A-share only and take a thscode-style symbol.
+_A_SHARE_PREFIXES = ("hithink_", "cninfo_")
+_A_SHARE_FAMILIES = ("consensus_estimate",)
+
+
+def _is_a_share_family(family: str) -> bool:
+    return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
 
 FETCHERS = {
     "company_financials": ("SEC companyfacts", sec_companyfacts.fetch_company_financials,
@@ -54,6 +62,9 @@ FETCHERS = {
     "cninfo_announcements": ("CNINFO A-share announcement index (L1 primary disclosure)",
                              cninfo_disclosure.fetch_issuer_disclosures,
                              cninfo_disclosure.ENDPOINT),
+    "consensus_estimate": ("Eastmoney sell-side consensus (L5 expectation baseline)",
+                           eastmoney_consensus.fetch_consensus,
+                           eastmoney_consensus.ENDPOINT),
 }
 
 
@@ -476,7 +487,7 @@ def _do_fetch(args) -> int:
     records = res.records
     if family.startswith("futu_"):
         display_object = _display_futu_symbol(symbol)
-    elif family.startswith(("hithink_", "cninfo_")):
+    elif _is_a_share_family(family):
         try:
             display_object = hithink_finance.resolve_thscode(symbol)
         except net.FetchError as exc:
@@ -498,7 +509,7 @@ def _do_fetch(args) -> int:
     if args.no_emit:
         return 0
 
-    endpoint_symbol = display_object if family.startswith(("hithink_", "cninfo_")) else symbol.upper()
+    endpoint_symbol = display_object if _is_a_share_family(family) else symbol.upper()
     endpoint = endpoint_tmpl.format(
         symbol=endpoint_symbol,
         thscode=endpoint_symbol,
@@ -525,6 +536,11 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "new or amended issuer announcement, or the next periodic-report window "
             "(annual/Q1 by Apr 30, interim by Aug 31, Q3 by Oct 31)"
+        )
+    elif family == "consensus_estimate":
+        must_refresh_if = (
+            "analyst estimate revision, next earnings or guidance update, and before any "
+            "expectation-delta claim (the vendor payload carries no as-of timestamp)"
         )
     else:
         must_refresh_if = ""
@@ -554,8 +570,8 @@ def _effective_fetch_family(family: str) -> str:
 
 
 def _default_market_scope(family: str) -> str:
-    """hithink_*/cninfo_* families are A-share only; every other family keeps the US default."""
-    return "CN" if family.startswith(("hithink_", "cninfo_")) else "US"
+    """A-share families default to CN; every other family keeps the US default."""
+    return "CN" if _is_a_share_family(family) else "US"
 
 
 def _default_market_provider() -> str:

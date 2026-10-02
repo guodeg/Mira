@@ -108,6 +108,16 @@ SOURCE_POLICY = {
         freshness_status="current", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Aggregated sell-side expectations: useful as an expectation baseline, not as
+    # fact, and the payload carries no as-of timestamp of its own.
+    "eastmoney_consensus_api": dict(
+        provider="Eastmoney Data Center (东方财富数据中心) profit-forecast table",
+        speaker="sellside",
+        license_scope="aggregator_terms_unverified", storage_scope="private",
+        redistribution_allowed="unknown", readiness_impact="supports_working_view",
+        freshness_status="current", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(
