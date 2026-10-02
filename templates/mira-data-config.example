@@ -91,6 +91,14 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_MARGIN_MAX_BACKFILL_DAYS=14
 # MIRA_MARGIN_MAX_SEARCH_PAGES=12
 
+# --- Investor Q&A platforms (互动易 for Shenzhen, 上证e互动 for Shanghai) ------
+# Both are exchange-designated and keyless. 互动易 needs two POSTs per name; e互动
+# looks the company uid up by binary-searching its code-sorted directory, then parses
+# an HTML fragment, so both caps bound the request count for one on-demand read.
+# MIRA_QA_MAX_ITEMS=40
+# MIRA_QA_MAX_UID_PAGES=10
+# MIRA_QA_MAX_FEED_PAGES=3
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

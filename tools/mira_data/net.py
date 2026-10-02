@@ -67,6 +67,22 @@ def post_form_json(url: str, data: dict, *, headers: dict | None = None,
     return _as_json(raw, url)
 
 
+def post_form_text(url: str, data: dict, *, headers: dict | None = None,
+                   timeout: int = DEFAULT_TIMEOUT, retries: int = 2,
+                   backoff: float = 1.5) -> str:
+    """POST an ``x-www-form-urlencoded`` body and return the decoded text.
+
+    Some AJAX endpoints answer with HTML fragments rather than JSON (上证e互动's
+    company feed is one), which still has to go through the same retry policy.
+    """
+    hdrs = _base_headers(headers)
+    hdrs.setdefault("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+    body = urllib.parse.urlencode(data).encode("utf-8")
+    raw = _send(lambda: urllib.request.Request(url, data=body, headers=hdrs),
+                url, timeout, retries, backoff)
+    return raw.decode("utf-8", errors="replace")
+
+
 def _base_headers(headers: dict | None) -> dict:
     hdrs = {"User-Agent": config.contact_ua()[0], "Accept-Encoding": "gzip, deflate"}
     if headers:

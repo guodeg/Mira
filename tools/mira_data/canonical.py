@@ -185,6 +185,29 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Investor Q&A platforms. The channel is exchange-designated (L2) while the content
+    # is company commentary, so claim_type stays company_claim / company_statement: per
+    # claim-taxonomy.md a company claim is 公司口径 that still needs cross-checking.
+    "irm_cninfo": Posture(
+        source_id="irm_cninfo_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="company_claim",
+        evidence_category="company_statement",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "sse_einteraction": Posture(
+        source_id="sse_einteraction_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="company_claim",
+        evidence_category="company_statement",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

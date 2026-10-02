@@ -137,6 +137,24 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Company voice through an exchange-designated Q&A platform: attributable to the
+    # issuer, but commentary rather than a filed metric, so it supports a working view.
+    "irm_cninfo_api": dict(
+        provider="互动易 (Shenzhen exchange investor Q&A platform, via CNINFO)",
+        speaker="company",
+        license_scope="public_official_platform_terms_unverified", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_working_view",
+        freshness_status="current", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    "sse_einteraction_api": dict(
+        provider="上证e互动 (Shanghai exchange investor Q&A platform)",
+        speaker="company",
+        license_scope="public_official_platform_terms_unverified", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_working_view",
+        freshness_status="current", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

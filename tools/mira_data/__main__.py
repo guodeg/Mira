@@ -14,15 +14,15 @@ import sys
 
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, cninfo_disclosure, eastmoney_consensus, exchange_margin,
-                       futu_opend, hithink_finance, ibkr_gateway, sec_companyfacts,
-                       yahoo_chart)
+                       futu_opend, hithink_finance, ibkr_gateway, investor_qa,
+                       sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
-_A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market")
+_A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market", "investor_qa")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
-_THSCODE_FAMILIES = ("consensus_estimate", "margin_balance")
+_THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa")
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -78,6 +78,9 @@ FETCHERS = {
     "margin_market": ("SSE/SZSE market-wide margin aggregates (L2 exchange data)",
                       exchange_margin.fetch_margin_market,
                       exchange_margin.SSE_ENDPOINT),
+    "investor_qa": ("Investor Q&A: 互动易 for Shenzhen, 上证e互动 for Shanghai (L2 platform)",
+                    investor_qa.fetch_investor_qa,
+                    investor_qa.IRM_ENDPOINT),
 }
 
 
@@ -106,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--date", default=None,
                    help="margin_* families only: trade date YYYY-MM-DD "
                         "(defaults to the latest published day)")
+    f.add_argument("--days", type=int, default=None,
+                   help="investor_qa only: keep answers from the last N days")
     f.add_argument("--no-emit", action="store_true", help="print records only, don't write files")
 
     t = sub.add_parser("technical", help="compute technical context for a symbol")
@@ -457,6 +462,7 @@ def _do_config(_args) -> int:
         "MIRA_HITHINK_BIN", "MIRA_HITHINK_TIMEOUT",
         "MIRA_CNINFO_TIMEOUT", "MIRA_CNINFO_PAGE_SLEEP", "MIRA_CNINFO_MAX_ITEMS",
         "MIRA_MARGIN_MAX_BACKFILL_DAYS", "MIRA_MARGIN_MAX_SEARCH_PAGES",
+        "MIRA_QA_MAX_ITEMS", "MIRA_QA_MAX_UID_PAGES", "MIRA_QA_MAX_FEED_PAGES",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -479,13 +485,21 @@ def _do_fetch(args) -> int:
         return 2
     if family != "cninfo_announcements" and any(
             value not in (None, "", 0)
-            for value in (args.since, args.until, args.category, args.max_items)):
-        print(f"error: --since/--until/--category/--max-items apply to the "
+            for value in (args.since, args.until, args.category)):
+        print(f"error: --since/--until/--category apply to the "
               f"cninfo_announcements family, not {family}", file=sys.stderr)
+        return 2
+    if args.max_items is not None and family not in {"cninfo_announcements", "investor_qa"}:
+        print(f"error: --max-items applies to the cninfo_announcements/investor_qa "
+              f"families, not {family}", file=sys.stderr)
         return 2
     if args.date and family not in {"margin_balance", "margin_market"}:
         print(f"error: --date applies to the margin_balance/margin_market families, "
               f"not {family}", file=sys.stderr)
+        return 2
+    if args.days and family != "investor_qa":
+        print(f"error: --days applies to the investor_qa family, not {family}",
+              file=sys.stderr)
         return 2
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
@@ -503,6 +517,8 @@ def _do_fetch(args) -> int:
                       category=args.category or "", max_items=args.max_items)
     elif family in {"margin_balance", "margin_market"}:
         kwargs["date"] = args.date
+    elif family == "investor_qa":
+        kwargs.update(days=args.days, max_items=args.max_items)
     try:
         res = fetcher(symbol, as_of=args.as_of, market_scope=market_scope, **kwargs)
     except net.FetchError as exc:
@@ -574,6 +590,12 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "next trading day's publication; the exchanges publish after the close and can "
             "lag by a day or more, so re-read before using the level as current positioning"
+        )
+    elif family == "investor_qa":
+        must_refresh_if = (
+            "new company reply on the platform, or the next periodic-report window; a Q&A "
+            "answer is company commentary and needs an L1/L2 cross-check before it is "
+            "treated as fact"
         )
     else:
         must_refresh_if = ""
