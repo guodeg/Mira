@@ -14,9 +14,10 @@ import sys
 
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
-                       eastmoney_consensus, eastmoney_macro, exchange_margin, futu_opend,
-                       hithink_finance, hithink_options, ibkr_gateway, investor_qa,
-                       nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
+                       eastmoney_consensus, eastmoney_macro, exchange_disclosure,
+                       exchange_margin, futu_opend, hithink_finance, hithink_options,
+                       ibkr_gateway, investor_qa, nbs_stats, news_pointers,
+                       sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
@@ -24,7 +25,9 @@ _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
-                     "index_valuation")
+                     "index_valuation", "exchange_announcements")
+# Families that take the announcement-window flags (--since/--until/--max-items).
+_WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
@@ -110,6 +113,9 @@ FETCHERS = {
                       csindex_index.fetch_index_members, csindex_index.ENDPOINT),
     "index_valuation": ("Official CSI index valuation series: P/E and dividend yield (L2)",
                         csindex_index.fetch_index_valuation, csindex_index.ENDPOINT),
+    "exchange_announcements": ("Exchange-direct announcement metadata: SSE or SZSE (L1)",
+                               exchange_disclosure.fetch_exchange_announcements,
+                               exchange_disclosure.SSE_ENDPOINT),
 }
 
 
@@ -583,7 +589,7 @@ def _do_config(_args) -> int:
         "MIRA_OPTIONS_MAX_CONTRACTS", "MIRA_OPTIONS_SCAN_ROWS", "MIRA_OPTIONS_QUOTE_DAYS",
         "MIRA_MACRO_MAX_OBSERVATIONS", "MIRA_NBS_MONTHS", "MIRA_NBS_CACHE_DAYS",
         "MIRA_NBS_PAUSE", "MIRA_NEWS_MAX_ITEMS", "MIRA_NEWS_WINDOW_DAYS",
-        "MIRA_CSINDEX_YEARS",
+        "MIRA_CSINDEX_YEARS", "MIRA_EXCHANGE_WINDOW_DAYS", "MIRA_EXCHANGE_MAX_ITEMS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -604,15 +610,15 @@ def _do_fetch(args) -> int:
               f"(A-share statements are filed per period and need no YTD reconciliation), "
               f"not {family}", file=sys.stderr)
         return 2
-    if family != "cninfo_announcements" and any(
+    if family not in _WINDOW_FAMILIES and any(
             value not in (None, "", 0)
             for value in (args.since, args.until, args.category)):
         print(f"error: --since/--until/--category apply to the "
-              f"cninfo_announcements family, not {family}", file=sys.stderr)
+              f"{'/'.join(_WINDOW_FAMILIES)} families, not {family}", file=sys.stderr)
         return 2
-    if args.max_items is not None and family not in {"cninfo_announcements", "investor_qa"}:
-        print(f"error: --max-items applies to the cninfo_announcements/investor_qa "
-              f"families, not {family}", file=sys.stderr)
+    if args.max_items is not None and family not in _WINDOW_FAMILIES:
+        print(f"error: --max-items applies to the {'/'.join(_WINDOW_FAMILIES)} families, "
+              f"not {family}", file=sys.stderr)
         return 2
     if args.date and family not in {"margin_balance", "margin_market"}:
         print(f"error: --date applies to the margin_balance/margin_market families, "
@@ -650,6 +656,8 @@ def _do_fetch(args) -> int:
                       category=args.category or "", max_items=args.max_items)
     elif family in {"margin_balance", "margin_market"}:
         kwargs["date"] = args.date
+    elif family == "exchange_announcements":
+        kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
     elif family == "investor_qa":
         kwargs.update(days=args.days, max_items=args.max_items)
     elif family == "option_surface":
@@ -767,6 +775,11 @@ def _do_fetch(args) -> int:
             "next index close or the compiler's next composition/valuation file; the weights "
             "workbook can lag the constituent workbook, and the valuation workbook carries "
             "only the latest ~21 observations"
+        )
+    elif family == "exchange_announcements":
+        must_refresh_if = (
+            "next disclosure from the issuer; the window is explicit, so an older filing needs "
+            "--since rather than a wider default"
         )
     else:
         must_refresh_if = ""

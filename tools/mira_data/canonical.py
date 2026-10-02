@@ -285,6 +285,28 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Exchange-hosted announcement indexes: the same issuer filings the CNINFO channel reads,
+    # from the listing venue itself, so the two can be cross-checked rather than trusted singly.
+    "sse_announcement": Posture(
+        source_id="sse_announcement_api",
+        source_class="issuer_primary_disclosure",
+        authority_level="L1",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "szse_announcement": Posture(
+        source_id="szse_announcement_api",
+        source_class="issuer_primary_disclosure",
+        authority_level="L1",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

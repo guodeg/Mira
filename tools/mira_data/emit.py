@@ -191,6 +191,24 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Issuer filing metadata hosted by the listing venue. The speaker is the issuer; the
+    # exchange is the channel, and only the metadata is read (bodies stay links).
+    "sse_announcement_api": dict(
+        provider="Shanghai Stock Exchange announcement index",
+        speaker="company",
+        license_scope="exchange_terms_metadata_only", storage_scope="private",
+        redistribution_allowed="link_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="current", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    "szse_announcement_api": dict(
+        provider="Shenzhen Stock Exchange announcement index",
+        speaker="company",
+        license_scope="exchange_terms_metadata_only", storage_scope="private",
+        redistribution_allowed="link_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="current", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

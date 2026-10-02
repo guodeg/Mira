@@ -145,6 +145,13 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # The valuation workbook carries only the latest ~21 observations.
 # MIRA_CSINDEX_YEARS=3
 
+# --- Exchange-direct disclosure metadata (SSE / SZSE) -------------------------
+# The second entry point to the same filings the CNINFO channel reads, for cross-checking.
+# Metadata only: title, disclosure date and the document link are read; bodies are never
+# fetched or redistributed. Reads are bounded to one page and an explicit window.
+# MIRA_EXCHANGE_WINDOW_DAYS=90
+# MIRA_EXCHANGE_MAX_ITEMS=50
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and
