@@ -129,6 +129,13 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_NBS_MONTHS=36
 # MIRA_NBS_CACHE_DAYS=1
 
+# --- News pointers (discovery only) ------------------------------------------
+# `mira_data news <symbol>` returns headline / outlet / date / URL plus the L1 route to
+# check. It writes news-pointers.csv and nothing else — no canonical family, no
+# evidence-log — because media stays L4 context; cite the primary, not the article.
+# MIRA_NEWS_MAX_ITEMS=30
+# MIRA_NEWS_WINDOW_DAYS=30
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

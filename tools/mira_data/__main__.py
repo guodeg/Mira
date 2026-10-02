@@ -16,7 +16,7 @@ from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, eastmoney_consensus,
                        eastmoney_macro, exchange_margin, futu_opend, hithink_finance,
                        hithink_options, ibkr_gateway, investor_qa, nbs_stats,
-                       sec_companyfacts, yahoo_chart)
+                       news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
@@ -207,6 +207,14 @@ def main(argv: list[str] | None = None) -> int:
     nbs_search.add_argument("--frequency", default="monthly",
                             choices=("monthly", "quarterly", "annual"))
 
+    news = sub.add_parser(
+        "news", help="news pointers for one name (discovery only; never an evidence log)")
+    news.add_argument("symbol", help="A-share code, e.g. 600519")
+    news.add_argument("--days", type=int, default=None, help="look-back window (default 30)")
+    news.add_argument("--limit", type=int, default=None, help="max pointers (default 30)")
+    news.add_argument("--out", default=None,
+                      help="write news-pointers.csv here (still no evidence log)")
+
     args = parser.parse_args(argv)
     if args.cmd == "fetch":
         return _do_fetch(args)
@@ -230,6 +238,8 @@ def main(argv: list[str] | None = None) -> int:
         return _do_cninfo(args)
     if args.cmd == "nbs":
         return _do_nbs(args)
+    if args.cmd == "news":
+        return _do_news(args)
     parser.error("unknown command")
     return 2
 
@@ -499,6 +509,28 @@ def _do_nbs(args) -> int:
     return 2
 
 
+def _do_news(args) -> int:
+    try:
+        pointers = news_pointers.fetch_news_pointers(
+            args.symbol, days=args.days, limit=args.limit)
+    except net.FetchError as exc:
+        print(f"source_gap: could not read news pointers for {args.symbol}: {exc}",
+              file=sys.stderr)
+        return 1
+    print(f"# news pointers for {args.symbol.upper()} ({len(pointers)} headlines)")
+    print("# discovery only: no claim rows, no evidence log — read the primary before citing")
+    for pointer in pointers:
+        print(f"  {pointer['date']}  {pointer['outlet'][:14]:<16}{pointer['title'][:56]}")
+        print(f"      {pointer['url']}")
+    print("\n# primary routes to check")
+    for hint in dict.fromkeys(pointer["primary_route_hint"] for pointer in pointers):
+        print(f"  {hint}")
+    if args.out:
+        path = news_pointers.write_pointers(pointers, args.out)
+        print(f"\n# wrote {path} (pointers only — no manifest, no ingestion log, no evidence log)")
+    return 0
+
+
 def _do_config(_args) -> int:
     ua, configured = config.contact_ua()
     print("# mira_data config")
@@ -517,6 +549,7 @@ def _do_config(_args) -> int:
         "MIRA_RATES_MAX_OBSERVATIONS", "MIRA_RATES_WINDOW_DAYS",
         "MIRA_OPTIONS_MAX_CONTRACTS", "MIRA_OPTIONS_SCAN_ROWS", "MIRA_OPTIONS_QUOTE_DAYS",
         "MIRA_MACRO_MAX_OBSERVATIONS", "MIRA_NBS_MONTHS", "MIRA_NBS_CACHE_DAYS",
+        "MIRA_NBS_PAUSE", "MIRA_NEWS_MAX_ITEMS", "MIRA_NEWS_WINDOW_DAYS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
