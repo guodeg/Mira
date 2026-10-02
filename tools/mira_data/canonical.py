@@ -208,6 +208,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # CFETS benchmark rates: official interbank benchmarks, so genuine L2 macro data
+    # reachable without third-party dependencies. 国家统计局 is deliberately absent —
+    # its endpoints answer with a 服务异常 anti-bot page (see the adapter docstring).
+    "chinamoney_rates": Posture(
+        source_id="chinamoney_rates_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

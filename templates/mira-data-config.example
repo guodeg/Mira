@@ -99,6 +99,14 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_QA_MAX_UID_PAGES=10
 # MIRA_QA_MAX_FEED_PAGES=3
 
+# --- CFETS benchmark rates (LPR / Shibor, official, no key) -----------------
+# 国家统计局 endpoints answer with an anti-bot page and are documented as out of reach
+# for a stdlib adapter; these official fixings are reachable and cover the discount-rate
+# side. The vendor ignores out-of-range startDate, so the window is a request hint only
+# and the returned dates are what gets recorded.
+# MIRA_RATES_MAX_OBSERVATIONS=12
+# MIRA_RATES_WINDOW_DAYS=400
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

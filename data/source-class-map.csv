@@ -92,3 +92,4 @@ sse_margin_api,regulatory_and_exchange,L2 exchange-published margin financing an
 szse_margin_api,regulatory_and_exchange,L2 exchange-published margin financing and securities lending statistics,reviewed,"Official exchange market-structure data; 亿元 and 万股 normalised to 元 and 股."
 irm_cninfo_api,regulatory_and_exchange,L2 exchange-designated investor Q&A platform (Shenzhen),reviewed,"Channel is official; the content is company commentary, so claims are company_claim grade."
 sse_einteraction_api,regulatory_and_exchange,L2 exchange-designated investor Q&A platform (Shanghai),reviewed,"Channel is official; the content is company commentary, so claims are company_claim grade."
+chinamoney_rates_api,official_macro_and_industry,L2 official interbank benchmark fixings from CFETS (LPR and Shibor),reviewed,"Official CFETS fixings; used for L2 macro because NBS endpoints are anti-bot blocked."

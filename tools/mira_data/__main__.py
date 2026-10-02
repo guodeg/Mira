@@ -13,16 +13,19 @@ import argparse
 import sys
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bls, cninfo_disclosure, eastmoney_consensus, exchange_margin,
-                       futu_opend, hithink_finance, ibkr_gateway, investor_qa,
-                       sec_companyfacts, yahoo_chart)
+from .adapters import (bls, chinamoney_rates, cninfo_disclosure, eastmoney_consensus,
+                       exchange_margin, futu_opend, hithink_finance, ibkr_gateway,
+                       investor_qa, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
-_A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market", "investor_qa")
+_A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
+                     "investor_qa", "macro_rates")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa")
+# Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
+_MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES"}
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -81,6 +84,9 @@ FETCHERS = {
     "investor_qa": ("Investor Q&A: 互动易 for Shenzhen, 上证e互动 for Shanghai (L2 platform)",
                     investor_qa.fetch_investor_qa,
                     investor_qa.IRM_ENDPOINT),
+    "macro_rates": ("CFETS benchmark rates: LPR and Shibor (L2 official macro)",
+                    chinamoney_rates.fetch_macro_rates,
+                    chinamoney_rates.LPR_ENDPOINT),
 }
 
 
@@ -463,6 +469,7 @@ def _do_config(_args) -> int:
         "MIRA_CNINFO_TIMEOUT", "MIRA_CNINFO_PAGE_SLEEP", "MIRA_CNINFO_MAX_ITEMS",
         "MIRA_MARGIN_MAX_BACKFILL_DAYS", "MIRA_MARGIN_MAX_SEARCH_PAGES",
         "MIRA_QA_MAX_ITEMS", "MIRA_QA_MAX_UID_PAGES", "MIRA_QA_MAX_FEED_PAGES",
+        "MIRA_RATES_MAX_OBSERVATIONS", "MIRA_RATES_WINDOW_DAYS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -504,7 +511,7 @@ def _do_fetch(args) -> int:
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
         symbol = config.get("MIRA_IBKR_ACCOUNT", "ALL") or "ALL"
-    elif family == "margin_market" and not symbol:
+    elif family in _MARKET_SERIES_FAMILIES and not symbol:
         symbol = "BOTH"
     elif not symbol:
         print(f"error: fetch {args.family} requires a symbol", file=sys.stderr)
@@ -528,8 +535,8 @@ def _do_fetch(args) -> int:
     records = res.records
     if family.startswith("futu_"):
         display_object = _display_futu_symbol(symbol)
-    elif family == "margin_market":
-        display_object = f"{symbol.upper()}_MARGIN"
+    elif family in _MARKET_SERIES_FAMILIES:
+        display_object = f"{symbol.upper()}_{_MARKET_SERIES_FAMILIES[family]}"
     elif _is_thscode_family(family):
         try:
             display_object = hithink_finance.resolve_thscode(symbol)
@@ -552,7 +559,8 @@ def _do_fetch(args) -> int:
     if args.no_emit:
         return 0
 
-    endpoint_symbol = (display_object if _is_thscode_family(family) or family == "margin_market"
+    endpoint_symbol = (display_object
+                       if _is_thscode_family(family) or family in _MARKET_SERIES_FAMILIES
                        else symbol.upper())
     endpoint = endpoint_tmpl.format(
         symbol=endpoint_symbol,
@@ -596,6 +604,10 @@ def _do_fetch(args) -> int:
             "new company reply on the platform, or the next periodic-report window; a Q&A "
             "answer is company commentary and needs an L1/L2 cross-check before it is "
             "treated as fact"
+        )
+    elif family == "macro_rates":
+        must_refresh_if = (
+            "next benchmark fixing (LPR on the 20th of each month, Shibor each trading day)"
         )
     else:
         must_refresh_if = ""
