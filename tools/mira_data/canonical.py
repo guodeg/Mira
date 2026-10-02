@@ -285,6 +285,29 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Stock Connect turnover as published by each exchange: official aggregate market
+    # statistics, so L2 like the margin rows, and never a substitute for the net flow that the
+    # exchanges stopped publishing on 2024-08-16.
+    "sse_northbound": Posture(
+        source_id="sse_northbound_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "szse_northbound": Posture(
+        source_id="szse_northbound_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # Exchange-hosted announcement indexes: the same issuer filings the CNINFO channel reads,
     # from the listing venue itself, so the two can be cross-checked rather than trusted singly.
     "sse_announcement": Posture(

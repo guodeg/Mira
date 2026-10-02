@@ -15,9 +15,9 @@ import sys
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
                        eastmoney_consensus, eastmoney_macro, exchange_disclosure,
-                       exchange_margin, futu_opend, hithink_finance, hithink_options,
-                       ibkr_gateway, investor_qa, nbs_stats, news_pointers,
-                       sec_companyfacts, yahoo_chart)
+                       exchange_margin, exchange_northbound, futu_opend, hithink_finance,
+                       hithink_options, ibkr_gateway, investor_qa, nbs_stats,
+                       news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
@@ -25,15 +25,17 @@ _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
-                     "index_valuation", "exchange_announcements")
+                     "index_valuation", "exchange_announcements", "northbound_turnover")
 # Families that take the announcement-window flags (--since/--until/--max-items).
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements")
+# Market-level families whose symbol is a venue selector defaulting to both venues.
+_VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
 _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "macro_china": "MACRO", "macro_nbs": "NBS",
-                           "macro_region": "REGION"}
+                           "macro_region": "REGION", "northbound_turnover": "NORTHBOUND"}
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -116,6 +118,9 @@ FETCHERS = {
     "exchange_announcements": ("Exchange-direct announcement metadata: SSE or SZSE (L1)",
                                exchange_disclosure.fetch_exchange_announcements,
                                exchange_disclosure.SSE_ENDPOINT),
+    "northbound_turnover": ("Exchange-published Stock Connect turnover, SSE/SZSE (L2)",
+                            exchange_northbound.fetch_northbound_turnover,
+                            exchange_northbound.ENDPOINT),
 }
 
 

@@ -209,6 +209,24 @@ SOURCE_POLICY = {
         freshness_status="current", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Stock Connect turnover as published by each exchange: official aggregate statistics, and
+    # explicitly not the net flow that stopped being published on 2024-08-16.
+    "sse_northbound_api": dict(
+        provider="Shanghai Stock Exchange Stock Connect turnover",
+        speaker="exchange",
+        license_scope="public_official_market_statistics", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    "szse_northbound_api": dict(
+        provider="Shenzhen Stock Exchange Stock Connect turnover",
+        speaker="exchange",
+        license_scope="public_official_market_statistics", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

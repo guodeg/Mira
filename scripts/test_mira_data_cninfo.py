@@ -285,6 +285,23 @@ def test_operating_flash_and_cross_listing_filings() -> None:
     print("ok 产销快报 and H股公告 are named; governance paperwork stays out")
 
 
+def test_trading_status_and_enforcement_events() -> None:
+    """Halt, pledge, investigation and risk-alert titles get their own tokens."""
+    cases = (
+        ("关于公司股票停牌的公告", "trading_halt"),
+        ("关于股票复牌暨风险提示的公告", "trading_halt"),
+        ("关于控股股东部分股份解除质押的公告", "share_pledge"),
+        ("关于收到中国证监会立案告知书的公告", "investigation"),
+        ("关于股票交易异常波动的公告", "risk_alert"),
+        ("关于公司股票被实施退市风险警示的公告", "risk_alert"),
+    )
+    for title, expected in cases:
+        token, basis = cn.classify(_announcement(announcementTitle=title,
+                                                 announcementType="01010503||010112"))
+        assert token == expected, (title, token, expected, basis)
+    print("ok halt, pledge, investigation and risk-alert titles classify explicitly")
+
+
 def test_registry_rows_are_registered() -> None:
     for path, column, expected in (
         (ROOT / "data" / "source-registry.csv", "source_id", None),
@@ -316,6 +333,7 @@ def main() -> int:
     test_paging_respects_max_items_and_has_more()
     test_category_filter_still_demotes_report_shells()
     test_operating_flash_and_cross_listing_filings()
+    test_trading_status_and_enforcement_events()
     test_registry_rows_are_registered()
     print("mira_data_cninfo_tests: pass")
     return 0

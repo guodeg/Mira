@@ -146,6 +146,14 @@ TITLE_RULES: list[tuple[str, str]] = [
     (r"股东大会|股东会", "shareholder_meeting"),
     (r"董事会.*决议|董事会公告", "board_resolution"),
     (r"监事会", "supervisory_resolution"),
+    # Trading-status and enforcement events. These were missing until the exchange-direct
+    # research surfaced the reviewed title taxonomy used for the same filings there, and they
+    # are the events a monitoring loop actually keys on: a halt changes tradability today, an
+    # investigation or a pledge changes the risk picture.
+    (r"停牌|复牌", "trading_halt"),
+    (r"质押", "share_pledge"),
+    (r"立案调查|立案告知书|调查通知书", "investigation"),
+    (r"风险提示|异常波动|退市风险警示", "risk_alert"),
     (r"股权激励|限制性股票|激励计划", "equity_incentive"),
     (r"中标|中选|合同|订单", "contract_award"),
     (r"诉讼|仲裁", "litigation"),
