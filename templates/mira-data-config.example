@@ -116,6 +116,12 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_OPTIONS_SCAN_ROWS=200
 # MIRA_OPTIONS_QUOTE_DAYS=20
 
+# --- China national accounts (CPI/PPI/GDP/PMI) -------------------------------
+# Read from an aggregator relay because the NBS endpoints are anti-bot blocked for a
+# stdlib client, so records are stamped L5 and say so. The 1Y window is a request hint:
+# the vendor table has no publish timestamp and the retrieval date is the vintage.
+# MIRA_MACRO_MAX_OBSERVATIONS=24
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

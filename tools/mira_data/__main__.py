@@ -14,18 +14,20 @@ import sys
 
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, eastmoney_consensus,
-                       exchange_margin, futu_opend, hithink_finance, hithink_options,
-                       ibkr_gateway, investor_qa, sec_companyfacts, yahoo_chart)
+                       eastmoney_macro, exchange_margin, futu_opend, hithink_finance,
+                       hithink_options, ibkr_gateway, investor_qa, sec_companyfacts,
+                       yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
-                     "investor_qa", "macro_rates", "option_surface")
+                     "investor_qa", "macro_rates", "option_surface", "macro_china")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
-_MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES"}
+_MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
+                           "macro_china": "MACRO"}
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -90,6 +92,9 @@ FETCHERS = {
     "option_surface": ("A-share ETF options surface (L5, via hithink-finance CLI)",
                        hithink_options.fetch_option_surface,
                        hithink_options.ENDPOINT),
+    "macro_china": ("China CPI/PPI/GDP/PMI (L5 relay of official releases)",
+                    eastmoney_macro.fetch_macro_china,
+                    eastmoney_macro.ENDPOINT),
 }
 
 
@@ -478,6 +483,7 @@ def _do_config(_args) -> int:
         "MIRA_QA_MAX_ITEMS", "MIRA_QA_MAX_UID_PAGES", "MIRA_QA_MAX_FEED_PAGES",
         "MIRA_RATES_MAX_OBSERVATIONS", "MIRA_RATES_WINDOW_DAYS",
         "MIRA_OPTIONS_MAX_CONTRACTS", "MIRA_OPTIONS_SCAN_ROWS", "MIRA_OPTIONS_QUOTE_DAYS",
+        "MIRA_MACRO_MAX_OBSERVATIONS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -627,6 +633,11 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "next session's quote, or an underlying move that changes the ATM strike; the "
             "surface carries closing prices only, not open interest or implied volatility"
+        )
+    elif family == "macro_china":
+        must_refresh_if = (
+            "next official release (CPI/PPI/PMI monthly, GDP quarterly); the relay carries "
+            "no publish timestamp, so re-read before quoting it as the current print"
         )
     else:
         must_refresh_if = ""

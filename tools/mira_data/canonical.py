@@ -233,6 +233,20 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # National accounts (CPI/PPI/GDP/PMI) read from an aggregator's table because the NBS
+    # endpoints are anti-bot blocked for a stdlib client. The content is official
+    # statistics but the channel is not the controlling source, so the tier is L5 and the
+    # claim is a reported metric rather than a fact.
+    "eastmoney_macro": Posture(
+        source_id="eastmoney_macro_api",
+        source_class="official_macro_and_industry",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

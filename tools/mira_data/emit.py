@@ -163,6 +163,16 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Aggregator relay of official national accounts: the numbers are as released, but the
+    # channel is not the controlling source, so it supports a working view only.
+    "eastmoney_macro_api": dict(
+        provider="Eastmoney Data Center (relay of NBS national accounts)",
+        speaker="official_agency",
+        license_scope="aggregator_relay_of_official_statistics", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_working_view",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

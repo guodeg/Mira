@@ -93,3 +93,4 @@ szse_margin_api,regulatory_and_exchange,L2 exchange-published margin financing a
 irm_cninfo_api,regulatory_and_exchange,L2 exchange-designated investor Q&A platform (Shenzhen),reviewed,"Channel is official; the content is company commentary, so claims are company_claim grade."
 sse_einteraction_api,regulatory_and_exchange,L2 exchange-designated investor Q&A platform (Shanghai),reviewed,"Channel is official; the content is company commentary, so claims are company_claim grade."
 chinamoney_rates_api,official_macro_and_industry,L2 official interbank benchmark fixings from CFETS (LPR and Shibor),reviewed,"Official CFETS fixings; used for L2 macro because NBS endpoints are anti-bot blocked."
+eastmoney_macro_api,official_macro_and_industry,L5 aggregator relay of official national accounts,reviewed,"Content is official statistics but the channel is an aggregator, so it stays L5 and supports a working view."
