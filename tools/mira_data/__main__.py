@@ -23,12 +23,13 @@ from .emit import emit_bundle
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
-                     "macro_nbs")
+                     "macro_nbs", "macro_region")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
 _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
-                           "macro_china": "MACRO", "macro_nbs": "NBS"}
+                           "macro_china": "MACRO", "macro_nbs": "NBS",
+                           "macro_region": "REGION"}
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -99,6 +100,9 @@ FETCHERS = {
     "macro_nbs": ("Official NBS series: prices, PMI trio, industrial output/revenue, "
                   "property, investment, income, retail and GDP (L2)",
                   nbs_stats.fetch_macro_nbs, nbs_stats.ENDPOINT),
+    "macro_region": ("Official NBS regional statistics: provincial GDP/income, "
+                     "地级市 catalogue (L2)",
+                     nbs_stats.fetch_nbs_region, nbs_stats.ENDPOINT),
 }
 
 
@@ -131,6 +135,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="investor_qa only: keep answers from the last N days")
     f.add_argument("--expiry", default=None,
                    help="option_surface only: expiry month YYYY-MM (defaults to the nearest)")
+    f.add_argument("--regions", default=None,
+                   help="macro_region only: comma-separated region names, e.g. 北京,上海,广东")
+    f.add_argument("--region-kind", default="province", choices=("province", "city"),
+                   help="macro_region only: province (31) or major-city (71) catalog")
     f.add_argument("--max-contracts", type=int, default=None,
                    help="option_surface only: cap on priced contracts")
     f.add_argument("--no-emit", action="store_true", help="print records only, don't write files")
@@ -205,7 +213,12 @@ def main(argv: list[str] | None = None) -> int:
     nbs_search = nbs_sub.add_parser("search", help="find official indicator ids by keyword")
     nbs_search.add_argument("keyword", help="Chinese keyword, e.g. 居民消费价格指数")
     nbs_search.add_argument("--frequency", default="monthly",
-                            choices=("monthly", "quarterly", "annual"))
+                            choices=("monthly", "quarterly", "annual", "province_monthly",
+                                     "province_quarterly", "province_annual",
+                                     "city_monthly_price"))
+    nbs_regions = nbs_sub.add_parser(
+        "regions", help="list official region codes used by the macro_region family")
+    nbs_regions.add_argument("--kind", default="province", choices=("province", "city"))
 
     news = sub.add_parser(
         "news", help="news pointers for one name (discovery only; never an evidence log)")
@@ -490,6 +503,17 @@ def _do_cninfo(args) -> int:
 
 
 def _do_nbs(args) -> int:
+    if args.nbs_cmd == "regions":
+        try:
+            rows = nbs_stats.list_regions(args.kind)
+        except net.FetchError as exc:
+            print(f"source_gap: could not read the NBS region catalogue: {exc}", file=sys.stderr)
+            return 1
+        print(f"# nbs {args.kind} regions: {len(rows)}")
+        for row in rows:
+            print(f"  {row['code']}  {row['name']}")
+        return 0
+
     if args.nbs_cmd == "search":
         try:
             rows = nbs_stats.search_indicators(args.keyword, frequency=args.frequency)
@@ -592,6 +616,10 @@ def _do_fetch(args) -> int:
         print(f"error: --expiry/--max-contracts apply to the option_surface family, "
               f"not {family}", file=sys.stderr)
         return 2
+    if args.regions and family != "macro_region":
+        print(f"error: --regions applies to the macro_region family, not {family}",
+              file=sys.stderr)
+        return 2
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
         symbol = config.get("MIRA_IBKR_ACCOUNT", "ALL") or "ALL"
@@ -612,6 +640,9 @@ def _do_fetch(args) -> int:
         kwargs.update(days=args.days, max_items=args.max_items)
     elif family == "option_surface":
         kwargs.update(expiry=args.expiry, max_contracts=args.max_contracts)
+    elif family == "macro_region":
+        kwargs.update(regions=[part for part in (args.regions or "").split(",") if part.strip()]
+                      or None, kind=args.region_kind)
     try:
         res = fetcher(symbol, as_of=args.as_of, market_scope=market_scope, **kwargs)
     except net.FetchError as exc:
@@ -709,6 +740,11 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "next official release; unpublished periods come back as 无 rather than absent, "
             "so a value can appear later within the same period code"
+        )
+    elif family == "macro_region":
+        must_refresh_if = (
+            "next provincial release; a multi-region read returns the latest period only, so "
+            "a history needs one region per call"
         )
     else:
         must_refresh_if = ""

@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import re
 import time
 import urllib.parse
 from dataclasses import dataclass, field
@@ -106,6 +107,69 @@ ROOTS = {
 CATALOG_CODES = {"monthly": "1", "quarterly": "2", "annual": "3"}
 UNPUBLISHED = {"", "无", "null", "None", "-"}
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Regional catalogs (probed live 2026-10-02). ``code`` for the tree is 4/5/6/7; the
+# per-catalog region *codes* come from a different endpoint, see ``list_regions``.
+REGION_ROOTS = {
+    "province_monthly": "f4c6cd795fea436c807163397dd36b98",
+    "province_quarterly": "854f819b04104191a5ae2f2cba270e6c",
+    "province_annual": "c4d82af16c3d4f0cb4f09d4af7d5888e",
+    "city_monthly_price": "327ecbb2e6b14c669da1e99e39faa24c",
+}
+REGION_CATALOGS = {
+    "province": "a10dceae75d245008bf4b9a0e6fe1d55",   # 31 provinces/municipalities
+    "city": "44016f1bffeb4ea49fe34e100c6415fb",       # 71 major cities
+}
+REGION_LABELS = {"province": "省级", "city": "主要城市"}
+DAS_PATH = "/getDasByDaCatalogId"
+
+
+@dataclass(frozen=True)
+class RegionSeries:
+    key: str
+    label: str
+    frequency: str
+    cid: str
+    metric: str
+    indicator_id: str
+    unit: str
+    currency: Optional[str] = None
+
+
+# Regional indicator ids resolved live through the keyword search; the province/annual and
+# province/quarterly catalogs are different cids, and a quarterly regional figure is
+# year-to-date by construction (累计值), so the metric name says so.
+REGION_SERIES: dict[str, RegionSeries] = {
+    "REGION_GDP": RegionSeries("REGION_GDP", "地区生产总值", "province_annual",
+                               "6f8fbd415cbc40ffa7ecb7fd917f2598", "region_gdp",
+                               "aff57de5ee994283974705914fbed246", "CNY_100m", "CNY"),
+    "REGION_GDP_PER_CAPITA": RegionSeries(
+        "REGION_GDP_PER_CAPITA", "人均地区生产总值", "province_annual",
+        "6f8fbd415cbc40ffa7ecb7fd917f2598", "region_gdp_per_capita",
+        "779b419f7be14d8f823e5e61810a4909", "CNY", "CNY"),
+    "REGION_INCOME": RegionSeries("REGION_INCOME", "全体居民人均可支配收入", "province_annual",
+                                  "5c072e1073514e448de4132760308fcf",
+                                  "region_income_per_capita",
+                                  "bda568266e4c445b867d25626e1f6b8a", "CNY", "CNY"),
+    "REGION_GDP_QUARTERLY": RegionSeries(
+        "REGION_GDP_QUARTERLY", "地区生产总值累计值", "province_quarterly",
+        "44ecf9ea21884caea5451c35e9c08fff", "region_gdp_ytd",
+        "dc168397231c49f391ee9e11966de389", "CNY_100m", "CNY"),
+    "REGION_INCOME_QUARTERLY": RegionSeries(
+        "REGION_INCOME_QUARTERLY", "居民人均可支配收入累计值", "province_quarterly",
+        "1065e991d0c84623bf0e0d012f36c0e3", "region_income_per_capita_ytd",
+        "0f6eafa0055f46bfbe61c3e2eafeb218", "CNY", "CNY"),
+}
+
+# The single most important things to know about regional reads, recorded on every record:
+# showType=3 returns the period x region matrix in ONE call (periods outside, regions inside
+# under ``area``); showType=2 groups by region but returns only the latest period, and
+# showType=1 groups by period for a single region only; and setting ``daCatalogId`` to a
+# region catalogue makes the vendor answer with English region names ("Beijing"), so this
+# adapter leaves it empty and resolves codes from the catalogue it requested.
+REGION_MODE_NOTE = ("showType=3 period x region matrix; regions are labelled by ``area``, and "
+                    "the vendor intermittently answers success=true with an empty payload, "
+                    "which is retried rather than reported as no data")
 
 
 @dataclass(frozen=True)
@@ -381,6 +445,10 @@ def _series(entry: Series, periods: list[dict]) -> dict:
 
 def _dts_window(frequency: str, as_of: str) -> str:
     day = _dt.date.fromisoformat(as_of)
+    if frequency == "annual":
+        # Regional annual catalogs serve a long history cheaply, and a single-region read
+        # returns the whole window, so ask for a decade rather than the national default.
+        return f"{day.year - 10}YY-{day.year}YY"
     if frequency == "quarterly":
         years = max(2, _months() // 12)
         start = f"{day.year - years}01SS"
@@ -433,12 +501,21 @@ def _basis(entry: Series) -> dict:
     return {"notes": notes}
 
 
+def _root_for(frequency: str) -> str:
+    """National catalogs, then the regional ones (same search endpoint, different root)."""
+    if frequency in ROOTS:
+        return ROOTS[frequency]
+    if frequency in REGION_ROOTS:
+        return REGION_ROOTS[frequency]
+    raise net.FetchError(
+        f"invalid_frequency: {frequency!r} "
+        f"(use {', '.join(list(ROOTS) + list(REGION_ROOTS))})")
+
+
 def search_indicators(keyword: str, *, frequency: str = "monthly") -> list[dict]:
-    """Keyword -> indicator ids for discovery (``nbs search``)."""
-    if frequency not in ROOTS:
-        raise net.FetchError(f"invalid_frequency: {frequency!r} (use monthly/quarterly/annual)")
+    """Keyword -> indicator ids for discovery (``nbs search``, and the region builder)."""
     url = (BASE + INDICATORS_PATH + "?" + urllib.parse.urlencode(
-        {"cid": "", "dt": "", "rootId": ROOTS[frequency], "name": keyword}))
+        {"cid": "", "dt": "", "rootId": _root_for(frequency), "name": keyword}))
     payload = _session().get_json(url, retries=2, backoff=1.5)
     rows = ((payload.get("data") or {}).get("list")) or []
     return [
@@ -446,3 +523,275 @@ def search_indicators(keyword: str, *, frequency: str = "monthly") -> list[dict]
          "name": (row.get("i_showname") or "").strip(), "mark": row.get("i_mark")}
         for row in rows
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Regional reads (分省 / 主要城市)
+# --------------------------------------------------------------------------- #
+
+def list_regions(kind: str = "province") -> list[dict]:
+    """Official region list for a catalog, cached: ``[{name, code, showname}]``."""
+    if kind not in REGION_CATALOGS:
+        raise net.FetchError(
+            f"invalid_region_kind: {kind!r} (use {', '.join(REGION_CATALOGS)})")
+    path = _cache_dir() / f"nbs-regions-{kind}.json"
+    data = None
+    if path.exists() and _cache_days() > 0:
+        age = (_dt.datetime.now() - _dt.datetime.fromtimestamp(path.stat().st_mtime)).days
+        if age < _cache_days():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = None
+    if data is None:
+        root = REGION_ROOTS["province_annual"]
+        url = (BASE + DAS_PATH + "?" + urllib.parse.urlencode(
+            {"daCid": REGION_CATALOGS[kind], "rootId": root}))
+        payload = _session().get_json(url, retries=2, backoff=1.5)
+        rows = payload.get("data") or []
+        data = [{"name": str(row.get("name_text") or row.get("show_name") or "").strip(),
+                 "code": str(row.get("name_value") or "").strip(),
+                 "showname": str(row.get("show_name") or "").strip()}
+                for row in rows if row.get("name_value")]
+        try:
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+    if not data:
+        raise net.FetchError(f"nbs_source_gap: region catalog {kind!r} returned nothing")
+    return data
+
+
+def resolve_regions(names: Optional[list[str]], kind: str = "province") -> list[dict]:
+    """Map user region names onto official entries (``北京`` -> 北京市).
+
+    Matching is deliberately tolerant in one direction only: an exact hit on the official
+    name or its short form wins, then a prefix hit; anything else is an error listing the
+    available names, because guessing which province a stray string meant is how a wrong
+    region ends up in an evidence log.
+    """
+    catalog = list_regions(kind)
+    if not names:
+        return catalog
+    wanted = [str(name).strip() for name in names if str(name).strip()]
+    resolved: list[dict] = []
+    unresolved: list[str] = []
+    for name in wanted:
+        hit = next((row for row in catalog
+                    if name in (row["name"], row["showname"])), None)
+        if hit is None:
+            hit = next((row for row in catalog
+                        if row["name"].startswith(name) or row["showname"].startswith(name)), None)
+        if hit is None:
+            unresolved.append(name)
+        elif hit not in resolved:
+            resolved.append(hit)
+    if unresolved:
+        sample = ", ".join(row["name"] for row in catalog[:6])
+        raise net.FetchError(
+            f"nbs_source_gap: unknown region(s) {', '.join(unresolved)} for catalog "
+            f"{kind!r}; available include: {sample} …")
+    return resolved
+
+
+def fetch_nbs_region(
+    series: str = "REGION_GDP",
+    regions: Optional[list[str]] = None,
+    *,
+    as_of: Optional[str] = None,
+    market_scope: str = "CN",
+    kind: str = "province",
+) -> FetchResult:
+    """Official regional statistics.
+
+    One region -> the catalog's full history (``showType=1``, attached as a side series);
+    several regions -> the latest published period each (``showType=2``), which is the only
+    cross-section the endpoint offers. Which mode ran is recorded in provenance, so a
+    cross-section is never mistaken for a history.
+    """
+    as_of = as_of or _dt.date.today().isoformat()
+    wanted = series.strip().upper()
+    if wanted == "ALL":
+        names = list(REGION_SERIES)
+    else:
+        names = [part.strip() for part in wanted.split(",") if part.strip()]
+        unknown = [name for name in names if name not in REGION_SERIES]
+        if unknown:
+            raise net.FetchError(
+                f"invalid_series: {', '.join(unknown)} "
+                f"(use {', '.join(REGION_SERIES)} or ALL, comma-separated)")
+        names = list(dict.fromkeys(names))
+
+    targets = resolve_regions(regions, kind=kind)
+    records: list[CanonicalRecord] = []
+    side_series: Optional[dict] = None
+    errors: list[str] = []
+    for index, name in enumerate(names):
+        entry = REGION_SERIES[name]
+        if index:
+            time.sleep(_pause())
+        try:
+            periods = _read_region(entry, targets, as_of=as_of)
+        except net.FetchError as exc:
+            errors.append(f"{name}: {exc}")
+            continue
+        basis = _basis_for(entry.cid, entry.indicator_id)
+        records.extend(_region_claims(entry, periods, basis, as_of=as_of,
+                                      market_scope=market_scope, targets=targets))
+        if len(names) == 1:
+            side_series = _region_series(entry, periods, targets)
+    if not records:
+        raise net.FetchError("nbs_source_gap: " + "; ".join(errors))
+    records.sort(key=lambda r: (r.metric, r.research_object), reverse=True)
+    return FetchResult(records, series=side_series)
+
+
+def _empty_retries() -> int:
+    try:
+        return max(0, min(5, int((config.get("MIRA_NBS_EMPTY_RETRIES") or "2").strip())))
+    except ValueError:
+        return 2
+
+
+def _read_region(entry: RegionSeries, targets: list[dict], *, as_of: str) -> list[dict]:
+    """Return ``[{region, code, periods:[{code,label,value}]}]`` newest period first.
+
+    ``showType=3`` answers with the whole period x region matrix: outer nodes are periods and
+    each period's ``values`` carry one entry per region under ``area``. Two traps are handled
+    here. First, the vendor sometimes answers ``success=true`` with an **empty payload** for
+    this endpoint (observed while probing), which is retried a bounded number of times
+    instead of being reported as "no data". Second, a region whose name is not in the
+    catalogue that was requested is dropped rather than guessed, so no value can be filed
+    under the wrong province.
+    """
+    payload = {
+        "cid": entry.cid,
+        "indicatorIds": [entry.indicator_id],
+        "daCatalogId": "",
+        "das": [{"text": row["name"], "value": row["code"]} for row in targets],
+        "dts": [_dts_window("annual" if entry.frequency == "province_annual" else "quarterly",
+                            as_of)],
+        "showType": "3",
+        "rootId": REGION_ROOTS[entry.frequency],
+    }
+    codes = {row["name"]: row["code"] for row in targets}
+    attempts = _empty_retries() + 1
+    body = {}
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(_pause() * (attempt + 1))
+        body = _session().post_json(BASE + DATA_PATH, payload, retries=2, backoff=1.5)
+        if not body.get("success"):
+            raise net.FetchError(f"vendor reported {body.get('message') or 'failure'}")
+        if body.get("data"):
+            break
+
+    collected: dict[str, dict] = {}
+    unknown: set[str] = set()
+    for node in body.get("data") or []:
+        label = _region_period_label(str(node.get("code") or ""), node.get("name"))
+        for value in node.get("values") or []:
+            number = _number(value.get("value"))
+            if number is None:
+                continue
+            area = str(value.get("area") or value.get("da_name") or "").strip()
+            if area not in codes:
+                if area:
+                    unknown.add(area)
+                continue
+            bucket = collected.setdefault(codes[area], {
+                "region": area, "code": codes[area], "periods": []})
+            bucket["periods"].append({"code": str(node.get("code") or ""),
+                                      "label": label, "value": number})
+    if not collected:
+        raise net.FetchError(
+            f"no published observation for {entry.label} in "
+            f"{payload['dts'][0]} after {attempts} attempt(s)"
+            + (f"; vendor regions not in the catalogue: {', '.join(sorted(unknown))}"
+               if unknown else ""))
+    regions = list(collected.values())
+    for region in regions:
+        region["periods"].sort(key=lambda item: item["label"], reverse=True)
+    return regions
+
+
+def _number(raw):
+    if raw is None or str(raw).strip() in UNPUBLISHED:
+        return None
+    try:
+        return float(str(raw).replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def _region_claims(entry: RegionSeries, regions: list[dict], basis: dict, *, as_of: str,
+                   market_scope: str, targets: list[dict]) -> list[CanonicalRecord]:
+    posture = POSTURES["nbs_stats"]
+    records = []
+    for region in regions:
+        latest = region["periods"][0]
+        code6 = region["code"][:6]
+        records.append(CanonicalRecord(
+            family="macro_series", research_object=f"CN_{code6}", market_scope=market_scope,
+            metric=entry.metric, value=latest["value"], unit=entry.unit,
+            currency=entry.currency, period=latest["label"],
+            period_type="calendar_period", as_of_date=as_of, source_date=as_of,
+            posture=posture, url_or_path=ENDPOINT.format(symbol=entry.key),
+            claim_text=f"{region['region']} {entry.label} {latest['label']} = "
+                       f"{latest['value']} {entry.unit}",
+            provenance={
+                "series": entry.key, "vendorSeries": entry.label,
+                "regionCode": region["code"], "regionName": region["region"],
+                "regionCatalog": REGION_CATALOGS["province"] if len(code6) == 6 else None,
+                "vendorPeriodCode": latest["code"],
+                "periodsInPayload": len(region["periods"]),
+                "regionsRequested": len(targets),
+                "regionModeNote": REGION_MODE_NOTE,
+                "frequency": entry.frequency,
+                "catalogId": entry.cid, "indicatorId": entry.indicator_id,
+                "rootId": REGION_ROOTS[entry.frequency],
+                "vendorMetric": basis.get("showname"),
+                "statisticalBasis": basis.get("mark"),
+                "basisStatus": "ok" if basis.get("showname") else "unavailable",
+                "vintage": "release carries no publish timestamp; vintage = retrieval date",
+            },
+        ))
+    return records
+
+
+def _region_series(entry: RegionSeries, regions: list[dict], targets: list[dict]) -> dict:
+    """Wide panel: one row per period, one column per region (a single table for Mira)."""
+    names = [region["region"] for region in regions]
+    periods = sorted({item["label"] for region in regions for item in region["periods"]})
+    rows = []
+    for period in periods:
+        row = {"period": period}
+        for region in regions:
+            match = next((item["value"] for item in region["periods"]
+                          if item["label"] == period), None)
+            row[region["region"]] = match
+        rows.append(row)
+    return {"name": f"nbs-region-{entry.key}",
+            "columns": ["period", *names], "rows": rows}
+
+
+def _region_period_label(code: str, dt_name) -> str:
+    if dt_name:
+        return re.sub(r"\s+", "", str(dt_name))
+    if code.endswith("YY") and len(code) >= 6:
+        return f"{code[:4]}年"
+    if code.endswith("SS") and len(code) >= 8:
+        return f"{code[:4]}Q{int(code[4:6])}"
+    if code.endswith("MM") and len(code) >= 8:
+        return f"{code[:4]}-{code[4:6]}"
+    return str(code)
+
+
+def _basis_for(cid: str, indicator_id: str) -> dict:
+    """The 口径 note for one regional indicator (catalog metadata, cached)."""
+    entry = Series(cid=cid, key=cid, label=cid, frequency="province_annual",
+                   metrics=[Metric(name=indicator_id, indicator_id=indicator_id,
+                                   unit="unknown")])
+    basis = _basis(entry)
+    return dict(basis.get("notes", {}).get(indicator_id) or {},
+                **({"error": basis["error"]} if basis.get("error") else {}))
