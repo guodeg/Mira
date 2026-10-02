@@ -75,7 +75,12 @@ CN_TZ = _dt.timezone(_dt.timedelta(hours=8))
 
 # A-share money fields are quoted in CNY; B-share boards are left out on purpose
 # until a real B-share symbol is requested (resolve_thscode would route 900xxx/200xxx).
+# Stock boards by leading digit, plus the listed-fund/ETF ranges: Shanghai funds are
+# 5xxxxx (510xxx-588xxx) and Shenzhen funds are 15xxxx/16xxxx/18xxxx. ETF codes reach
+# this helper through the option-surface, quote and announcement paths, so a bare
+# leading-digit rule that only knows stocks would reject them.
 _BOARD_BY_LEADING_DIGIT = {"6": "SH", "0": "SZ", "3": "SZ", "4": "BJ", "8": "BJ", "9": "BJ"}
+_FUND_BOARD_BY_PREFIX = {"5": "SH", "15": "SZ", "16": "SZ", "18": "SZ"}
 _BOARD_CURRENCY = {"SH": "CNY", "SZ": "CNY", "BJ": "CNY"}
 
 # (canonical_metric, vendor_field, vendor_label)
@@ -107,9 +112,10 @@ EXTRA_FIELDS = [("basic_eps", "basic_eps", "基本每股收益", "per_share")]
 def resolve_thscode(symbol: str) -> str:
     """Map a user symbol to a vendor thscode.
 
-    Accepts ``600519.SH`` (vendor), ``SH.600519`` (Futu style) or a bare 6-digit
-    A-share code, whose board is inferred from the leading digit. No remote
-    lookup: the mapping is deterministic so the adapter stays offline-testable.
+    Accepts ``600519.SH`` (vendor), ``SH.600519`` (Futu style) or a bare 6-digit code,
+    whose board is inferred from the leading digits — covering stocks **and listed
+    funds/ETFs** (Shanghai 5xxxxx, Shenzhen 15xxxx/16xxxx/18xxxx). No remote lookup: the
+    mapping is deterministic so the adapter stays offline-testable.
     """
     text = (symbol or "").strip().upper()
     if not text:
@@ -125,7 +131,9 @@ def resolve_thscode(symbol: str) -> str:
             "(expected 600519.SH, SH.600519 or a bare 6-digit code)")
     if len(text) != 6 or not text.isdigit():
         raise net.FetchError(f"invalid_symbol: {symbol!r} is not a 6-digit A-share code")
-    board = _BOARD_BY_LEADING_DIGIT.get(text[0])
+    board = (_FUND_BOARD_BY_PREFIX.get(text[:2])      # 15xxxx/16xxxx/18xxxx Shenzhen funds
+             or _FUND_BOARD_BY_PREFIX.get(text[0])    # 5xxxxx Shanghai funds/ETFs
+             or _BOARD_BY_LEADING_DIGIT.get(text[0]))
     if board is None:
         raise net.FetchError(f"invalid_symbol: no A-share board inferred for {symbol!r}")
     return f"{text}.{board}"

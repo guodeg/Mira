@@ -122,14 +122,20 @@ def test_resolve_thscode_infers_board() -> None:
     assert hf.resolve_thscode("830799") == "830799.BJ"
     assert hf.resolve_thscode("600519.SH") == "600519.SH"
     assert hf.resolve_thscode("sh.600519") == "600519.SH"
-    for bad in ("AAPL", "60051", "", "600519.US"):
+    # Listed funds/ETFs: Shanghai 5xxxxx, Shenzhen 15xxxx/16xxxx/18xxxx.
+    assert hf.resolve_thscode("510050") == "510050.SH"
+    assert hf.resolve_thscode("588000") == "588000.SH"
+    assert hf.resolve_thscode("159915") == "159915.SZ"
+    assert hf.resolve_thscode("160105") == "160105.SZ"
+    assert hf.resolve_thscode("sz.159915") == "159915.SZ"
+    for bad in ("AAPL", "60051", "", "600519.US", "5100500"):
         try:
             hf.resolve_thscode(bad)
         except net.FetchError as exc:
             assert "invalid_symbol" in str(exc)
         else:
             raise AssertionError(f"expected invalid_symbol for {bad!r}")
-    print("ok thscode resolution infers SH/SZ/BJ or passes an explicit suffix")
+    print("ok thscode resolution infers SH/SZ/BJ for stocks and listed funds/ETFs")
 
 
 def test_market_price_maps_snapshot_and_bars() -> None:

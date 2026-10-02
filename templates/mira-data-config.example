@@ -105,7 +105,16 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # side. The vendor ignores out-of-range startDate, so the window is a request hint only
 # and the returned dates are what gets recorded.
 # MIRA_RATES_MAX_OBSERVATIONS=12
-# MIRA_RATES_WINDOW_DAYS=400
+# MIRA_RATES_WINDOW_DAYS=360
+
+# --- A-share ETF options surface (via the hithink-finance CLI) ---------------
+# The contracts list has no per-underlying filter and is grouped by underlying with the
+# nearest expiry first, so the scan is bounded and selection happens locally. Each
+# surfaced contract costs one contract-detail call plus one daily call; open interest and
+# implied volatility are not published, so the surface is priced but not an IV surface.
+# MIRA_OPTIONS_MAX_CONTRACTS=10
+# MIRA_OPTIONS_SCAN_ROWS=200
+# MIRA_OPTIONS_QUOTE_DAYS=20
 
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
