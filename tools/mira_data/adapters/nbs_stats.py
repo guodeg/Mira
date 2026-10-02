@@ -45,9 +45,14 @@ Total industrial profit (规模以上工业企业利润总额) is published by t
 catalog slices that name it do not serve current data: probed live, one returns nothing at
 all for 2011-2026 and the other stops at 2011-12, and the 135-indicator revenue catalog
 carries profit only by industry. Since neither slice can answer "what is the current
-print", the metric is left out instead of being approximated from a stale archive. Money
-supply is absent for a different reason: it is central-bank data, not a statistical-agency
-series.
+print", the metric is left out instead of being approximated from a stale archive.
+
+Money supply used to be listed here as a gap on the belief that it is central-bank data. That
+was wrong and is corrected: the agency publishes M0/M1/M2 monthly under the names 货币和准货币
+(M2) / 货币 (M1) / 流通中现金 (M0), all six indicators in one catalog, and they ship here as
+the ``MONEY_SUPPLY`` series. The earlier probe missed them only because it searched for the
+literal string 货币供应量. The Eastmoney national-accounts table carries the same aggregates
+and stays as the cross-check.
 """
 
 from __future__ import annotations
@@ -290,6 +295,25 @@ SERIES: dict[str, Series] = {
                          Metric("household_income_per_capita_ytd_yoy",
                                 "7abcbb6f7c844b669d43da985d3f6ff2", "percent"),
                      ]),
+    # Money supply: this WAS listed as a gap here on the belief that it is central-bank data
+    # only. That was wrong - the agency publishes M0/M1/M2 monthly, and the earlier probe missed
+    # it only because it searched the literal string 货币供应量 while the indicators are named
+    # 货币和准货币 (M2) / 货币 (M1) / 流通中现金 (M0). All six live in one catalog.
+    "MONEY_SUPPLY": Series("MONEY_SUPPLY", "货币供应量 M0/M1/M2", "monthly",
+                           "82130c6621a745cda3d64b090e733383", [
+                               Metric("money_supply_m2", "f3c0ae453a54424489af41de315ec592",
+                                      "CNY_100m", "CNY"),
+                               Metric("money_supply_m2_yoy",
+                                      "e03f2232631f41cd9d754a7d7feb4a81", "percent"),
+                               Metric("money_supply_m1", "add08d4a1ca049158166f126e169edde",
+                                      "CNY_100m", "CNY"),
+                               Metric("money_supply_m1_yoy",
+                                      "640401d3351b4b868dea28f89f410a54", "percent"),
+                               Metric("money_supply_m0", "bd67997414b147a08d4aa03d146f4486",
+                                      "CNY_100m", "CNY"),
+                               Metric("money_supply_m0_yoy",
+                                      "db7891fb8f3c4eb2a4d71a9955eba8c7", "percent"),
+                           ]),
     "GDP": Series("GDP", "国内生产总值", "quarterly",
                   "28d936104e304aa191e338eb82b6dc09", [
                       Metric("gdp_quarterly", "d22612f09aeb4241bc557ef0ac61b3ba",
