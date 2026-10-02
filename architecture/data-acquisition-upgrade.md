@@ -342,6 +342,93 @@ which exercises the other side of §8: `ledgered=5`, every ledger row backed by 
 `derived_calculation` evidence row with `upstream_sources`, all `validate_repo`-
 clean. Options / short-interest / intraday stay `source_gap` (no free source).
 
+## 8d. A-share L1–L5 channels (implemented)
+
+Status note for §2: that diagnosis predates the substrate work. The registry now holds
+**96 rows, 20 of them `public_api`**; `tools/mira_data/` ships **22 fetch families, 14 usable
+with zero optional dependencies** (the other 8 are gated on `futu-api` / `ib_insync`); and
+**12 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US
+channels; this section documents the mainland ones, which have their own traps and their own
+tier split.
+
+| layer | family | adapter / registered source | tier | command |
+| --- | --- | --- | --- | --- |
+| L1 | issuer_disclosure | CNINFO 公告索引 (`cninfo_announcement_api`) | issuer_primary_disclosure | `mira_data fetch cninfo_announcements 600519 --since 2026-07-01` |
+| L2 | macro_series | NBS 数据发布库, 13 series (`nbs_stats_api`) | fact | `mira_data fetch macro_nbs ALL` |
+| L2 | macro_series | CFETS LPR / Shibor (`chinamoney_rates_api`) | fact | `mira_data fetch macro_rates BOTH` |
+| L2 | ownership_short_interest | SSE / SZSE margin (`sse_margin_api`, `szse_margin_api`) | fact | `mira_data fetch margin_balance 600519` |
+| L2 | transcript_claim | 互动易 / 上证e互动 (`irm_cninfo_api`, `sse_einteraction_api`) | company_claim | `mira_data fetch investor_qa 000001` |
+| L3 | consensus_estimate | Eastmoney 盈利预测 (`eastmoney_consensus_api`) | forecast | `mira_data fetch consensus_estimate 600519` |
+| L5 | market_price, company_financials | licensed hithink-finance CLI (`hithink_finance_api`) | market_pricing / reported_metric | `mira_data fetch hithink_market_price 600519` |
+| L5 | options_surface | ETF options over the same CLI (`hithink_finance_api`) | market_pricing | `mira_data fetch option_surface 510050` |
+| L5 | macro_series | Eastmoney national-accounts relay (`eastmoney_macro_api`) | reported_metric | `mira_data fetch macro_china ALL` |
+
+Every channel above walks the same contract: a `data/source-registry.csv` row, a 1:1
+`data/source-class-map.csv` row, a `POSTURES` entry, a `SOURCE_POLICY` entry, an offline
+suite registered in the quality gate, a clean `validate_repo.py`, and a bundle whose
+`evidence-log.csv` passes unchanged.
+
+**Official macro is the agency's own library — after this document's first attempt got it
+wrong.** An earlier probe here concluded the NBS endpoints needed TLS fingerprinting and were
+out of reach for a stdlib client. That was wrong, and the correction matters more than the
+adapter: the probe used **GET** against the *retired* paths (the library was replaced on
+2026-03-27; the announcement "关于新版国家统计局数据发布库上线的公告" says so, and the old
+`easyquery.htm` now 403s). The successor answers a **POST** with a JSON envelope, keyless,
+behind nothing but a browser User-Agent and Referer — 2.8 MB of JSON over plain `urllib`.
+Thirteen series ship (CPI, PPI, the PMI trio, industrial value added and revenue,
+unemployment, retail sales, fixed-asset investment with its three sector splits, real-estate
+investment, new-home sales, household income, GDP), each stamped L2 `fact` with the
+statistical basis (口径) attached. Four traps are absorbed and tested: unpublished periods
+come back as the literal string **`无`** rather than being absent, so non-numeric values are
+dropped instead of read as zero; indicator ids are opaque UUIDs and one series can be **split
+across catalog ids**, so each record names the cid/indicator/root it read and states that one
+call is not the whole history; the 口径 text exists only in the catalogue endpoint, so it is
+fetched once per catalogue and a failure there costs the note, never the data; and the library
+sits behind a Wangsu WAF that answers an uncookied request with an **intermittent 307**, so
+`net.py` grew a cookie-keeping `Session` with a warm-up and 307 joined the retryable statuses.
+Two gaps are documented rather than filled: total industrial profit is named by two catalogue
+slices that serve no current data (one empty across 2011-2026, one stopping at 2011-12), and
+money supply is central-bank data, not a statistical-agency series. The aggregator relay
+(`eastmoney_macro`) stays as the cross-check rather than being replaced: it already carried
+September PMI while the official library still returned `无` for that period, and where both
+publish, the prints agree (CPI 100.8 ~ +0.8%, PPI 103.8 ~ +3.8%, GDP 695,704 亿元).
+
+**Investor Q&A: the channel is official, the content is not.** 互动易 and 上证e互动 are
+exchange-designated platforms, so the channel is L2 `regulatory_and_exchange`, but what they
+carry is company commentary, so the claim stays `company_claim` / `company_statement` — a
+company's answer is 公司口径 that still needs cross-checking, not a verified fact. Coverage
+follows the exchanges and cannot be merged: 互动易 is the Shenzhen platform (000001 returns
+Q&A; 600519 and 688111 return zero rows), Shanghai names come from 上证e互动, and Beijing
+names have neither and degrade without spending a request. Unanswered questions are **not**
+emitted — investor attention is not company speech. The claims are extracts (200-character cap
+plus the platform URL for the full text, per the ingestion layer's "extract claims, not long
+text" rule), and e互动 needs the company uid found by binary-searching a code-sorted directory
+instead of pulling all 73 pages.
+
+**Exchange margin: two venues, two unit systems.** SSE publishes named fields in 元/股; SZSE
+publishes abbreviated fields in 亿元/万股 and, on one table, a securities-lending balance that
+was wrong by 10,000x until the unit factor was inferred from the vendor's own identity
+(融资余额 + 融券余额 = 融资融券余额) instead of assumed. The two exchanges also do not always
+publish the same day, so the adapter walks back within a bounded window and records both the
+requested and the used date. Beijing-exchange names are uncovered by this endpoint.
+
+**Options: priced, but not an implied-volatility surface.** A-share ETF options come from the
+licensed CLI (contracts / contract-detail / daily). The strike is read from contract-detail
+rather than parsed out of the vendor ticker, one unpriced contract degrades alone, and every
+record states `notPublished=open_interest,implied_volatility` — the endpoint publishes closing
+prices and volume, so the surface supports a straddle or a put/call volume read but **cannot**
+support OI, IV rank or skew.
+
+**Listed funds are symbols too.** Extending `resolve_thscode` to Shanghai 5xxxxx and Shenzhen
+15xxxx/16xxxx/18xxxx codes was not cosmetic: ETF codes reach the quote, announcement and
+option paths, and they were being rejected as invalid symbols.
+
+**Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
+media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
+route through aggregators and would land at L5 if built, and northbound **net flow is dead
+upstream** (verified nulls), so only holdings are obtainable. Sell-side report text stays
+manual/licensed; only its consensus numbers are ingested.
+
 ## 9. Cheap Cleanups (worth doing regardless)
 
 - ~~Re-annotate `stooq_history_csv_endpoint` (JS-PoW wall; demote to optional/manual).~~ **Done (P1).**
@@ -361,3 +448,15 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
   fact-grade). Revisit with exchange/OpenDART adapters in P4.
 - Exact capability-field vs overlay shape (§5) needs a `vocab.json` + `routing.schema.json` change
   that must pass `just check`; finalize wording in P2/P3 wiring.
+- **A-share news/media channel: blocked on a family decision.** The 11 canonical families have no
+  media shape (`transcript_claim` is a transcript, `estimate_revision` is a revision of estimates),
+  so 个股新闻 needs a new family — proposed as `media_report`, following the `issuer_disclosure`
+  precedent of adding a family rather than forcing an existing one. Until that is decided, media
+  coverage stays manual, and the A-share layer is complete everywhere else (§8d).
+- **Research-package orchestration entry is the next phase, not yet started.** The channels above
+  are per-name, per-family reads, so a single-name study still means eight commands and eight
+  separate evidence logs, while `loops/research-loop.md` expects one `investment-memo.md` plus one
+  merged `evidence-log.csv`. The entry point would fan out across the layers for one name, merge
+  the records into a single claim chain (carrying each claim's tier and any L1-vs-L5 conflict),
+  and write a package directory with `must_refresh_if` and source gaps. Scope and shape are the
+  user's call.
