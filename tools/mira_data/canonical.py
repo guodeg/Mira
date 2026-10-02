@@ -247,6 +247,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Genuine official national accounts: the statistical agency's own new data library
+    # (2026-03-27), keyless over a documented JSON API. This is the L2 source the relay
+    # above stands in for, and both can be read together as a cross-check.
+    "nbs_stats": Posture(
+        source_id="nbs_stats_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

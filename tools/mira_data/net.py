@@ -8,6 +8,7 @@ required by some official endpoints (notably SEC), so it is configurable via
 from __future__ import annotations
 
 import http.client
+import http.cookiejar
 import json
 import time
 import urllib.error
@@ -18,6 +19,11 @@ import zlib
 from . import config
 
 DEFAULT_TIMEOUT = 30
+# 307 is the Wangsu-WAF challenge the NBS library answers when a request arrives without
+# its cookie: the challenge response carries the cookie, so a retry through a session that
+# kept it succeeds. Treating it as transient is what turns an intermittent failure into a
+# slow success rather than a source gap.
+RETRY_STATUSES = (307, 429, 500, 502, 503, 504)
 
 
 class FetchError(RuntimeError):
@@ -67,6 +73,24 @@ def post_form_json(url: str, data: dict, *, headers: dict | None = None,
     return _as_json(raw, url)
 
 
+def post_json(url: str, payload: dict, *, headers: dict | None = None,
+              timeout: int = DEFAULT_TIMEOUT, retries: int = 2,
+              backoff: float = 1.5) -> dict:
+    """POST a JSON body and parse the JSON response.
+
+    The NBS data library is the reason this exists: its retired API was a GET, and the
+    replacement only answers a POST with a JSON envelope (a GET comes back as an
+    anti-bot HTML page, which is easy to misread as blocking rather than as a wrong
+    verb). Same retry and failure policy as :func:`get`.
+    """
+    hdrs = _base_headers(headers)
+    hdrs.setdefault("Content-Type", "application/json;charset=UTF-8")
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    raw = _send(lambda: urllib.request.Request(url, data=body, headers=hdrs),
+                url, timeout, retries, backoff)
+    return _as_json(raw, url)
+
+
 def post_form_text(url: str, data: dict, *, headers: dict | None = None,
                    timeout: int = DEFAULT_TIMEOUT, retries: int = 2,
                    backoff: float = 1.5) -> str:
@@ -90,6 +114,69 @@ def _base_headers(headers: dict | None) -> dict:
     return hdrs
 
 
+class Session:
+    """Cookie-preserving session for portals that gate on a challenge cookie.
+
+    The NBS data library sits behind a Wangsu WAF: a request without its cookie is
+    answered with an intermittent 307, and the site only settles once the challenge
+    cookie (``wzws_cid``) is presented. Warming up on the site's own page once, and
+    keeping cookies for the calls that follow, is the difference between a fetch that
+    works and one that randomly reports a source gap. Same retry policy as the module
+    functions.
+    """
+
+    def __init__(self, *, headers: dict | None = None, warmup_url: str | None = None,
+                 timeout: int = DEFAULT_TIMEOUT):
+        self._jar = http.cookiejar.CookieJar()
+        self._opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self._jar))
+        self._headers = dict(headers or {})
+        self._timeout = timeout
+        self._warmup_url = warmup_url
+        self._warmed = False
+
+    @property
+    def cookies(self) -> list[str]:
+        return sorted(cookie.name for cookie in self._jar)
+
+    def warmup(self, url: str | None = None) -> bool:
+        """GET the site page once so the WAF hands over its cookie. Never fatal."""
+        target = url or self._warmup_url
+        if not target or self._warmed:
+            return False
+        self._warmed = True
+        try:
+            req = urllib.request.Request(target, headers=_base_headers(self._headers))
+            with self._opener.open(req, timeout=self._timeout) as resp:
+                resp.read()
+        except (urllib.error.URLError, OSError, http.client.HTTPException):
+            return False
+        return True
+
+    def _hdrs(self, headers: dict | None) -> dict:
+        merged = dict(self._headers)
+        merged.update(headers or {})
+        return _base_headers(merged)
+
+    def get_json(self, url: str, *, headers: dict | None = None,
+                 retries: int = 2, backoff: float = 1.5) -> dict:
+        self.warmup()
+        hdrs = self._hdrs(headers)
+        raw = _send(lambda: urllib.request.Request(url, headers=hdrs), url,
+                    self._timeout, retries, backoff, opener=self._opener)
+        return _as_json(raw, url)
+
+    def post_json(self, url: str, payload: dict, *, headers: dict | None = None,
+                  retries: int = 2, backoff: float = 1.5) -> dict:
+        self.warmup()
+        hdrs = self._hdrs(headers)
+        hdrs.setdefault("Content-Type", "application/json;charset=UTF-8")
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        raw = _send(lambda: urllib.request.Request(url, data=body, headers=hdrs), url,
+                    self._timeout, retries, backoff, opener=self._opener)
+        return _as_json(raw, url)
+
+
 def _as_json(raw: bytes, url: str) -> dict:
     try:
         return json.loads(raw.decode("utf-8"))
@@ -98,13 +185,17 @@ def _as_json(raw: bytes, url: str) -> dict:
         raise FetchError(f"non-JSON response from {url}: {exc}", url=url) from exc
 
 
-def _send(make_request, url: str, timeout: int, retries: int, backoff: float) -> bytes:
+def _send(make_request, url: str, timeout: int, retries: int, backoff: float,
+          opener=None) -> bytes:
     """Issue ``make_request()`` with the shared retry policy; return raw bytes."""
     last_exc: Exception | None = None
+    # A session passes its cookie-keeping opener; plain calls keep using urlopen so the
+    # shared retry path stays monkey-patchable in tests.
+    sender = opener.open if opener is not None else urllib.request.urlopen
     for attempt in range(retries + 1):
         req = make_request()
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with sender(req, timeout=timeout) as resp:
                 try:
                     return _read_body(resp)
                 except http.client.IncompleteRead as exc:
@@ -118,7 +209,7 @@ def _send(make_request, url: str, timeout: int, retries: int, backoff: float) ->
                     raise
         except urllib.error.HTTPError as exc:
             last_exc = exc
-            if exc.code in (429, 500, 502, 503, 504) and attempt < retries:
+            if exc.code in RETRY_STATUSES and attempt < retries:
                 _sleep(backoff * (attempt + 1))
                 continue
             raise FetchError(f"HTTP {exc.code} for {url}", status=exc.code, url=url) from exc

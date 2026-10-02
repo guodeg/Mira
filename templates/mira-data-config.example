@@ -122,6 +122,13 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # the vendor table has no publish timestamp and the retrieval date is the vintage.
 # MIRA_MACRO_MAX_OBSERVATIONS=24
 
+# --- National Bureau of Statistics data library (official L2) -----------------
+# The 2026-03-27 replacement library: keyless JSON, but a POST body (a GET on the retired
+# paths returns an anti-bot page). Catalogue metadata is cached because indicator ids are
+# opaque UUIDs and the basis text (口径) only lives in the catalogue endpoint.
+# MIRA_NBS_MONTHS=36
+# MIRA_NBS_CACHE_DAYS=1
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and

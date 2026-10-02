@@ -15,19 +15,20 @@ import sys
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, eastmoney_consensus,
                        eastmoney_macro, exchange_margin, futu_opend, hithink_finance,
-                       hithink_options, ibkr_gateway, investor_qa, sec_companyfacts,
-                       yahoo_chart)
+                       hithink_options, ibkr_gateway, investor_qa, nbs_stats,
+                       sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
 _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
-                     "investor_qa", "macro_rates", "option_surface", "macro_china")
+                     "investor_qa", "macro_rates", "option_surface", "macro_china",
+                     "macro_nbs")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
 _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
-                           "macro_china": "MACRO"}
+                           "macro_china": "MACRO", "macro_nbs": "NBS"}
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -95,6 +96,8 @@ FETCHERS = {
     "macro_china": ("China CPI/PPI/GDP/PMI (L5 relay of official releases)",
                     eastmoney_macro.fetch_macro_china,
                     eastmoney_macro.ENDPOINT),
+    "macro_nbs": ("Official NBS series: CPI/PPI/PMI/unemployment/retail/FAI/GDP (L2)",
+                  nbs_stats.fetch_macro_nbs, nbs_stats.ENDPOINT),
 }
 
 
@@ -196,6 +199,13 @@ def main(argv: list[str] | None = None) -> int:
     cninfo_sub = cninfo.add_subparsers(dest="cninfo_cmd", required=True)
     cninfo_sub.add_parser("probe", help="check the org-id map and a live announcement query")
 
+    nbs = sub.add_parser("nbs", help="read-only National Bureau of Statistics utilities")
+    nbs_sub = nbs.add_subparsers(dest="nbs_cmd", required=True)
+    nbs_search = nbs_sub.add_parser("search", help="find official indicator ids by keyword")
+    nbs_search.add_argument("keyword", help="Chinese keyword, e.g. 居民消费价格指数")
+    nbs_search.add_argument("--frequency", default="monthly",
+                            choices=("monthly", "quarterly", "annual"))
+
     args = parser.parse_args(argv)
     if args.cmd == "fetch":
         return _do_fetch(args)
@@ -217,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
         return _do_hithink(args)
     if args.cmd == "cninfo":
         return _do_cninfo(args)
+    if args.cmd == "nbs":
+        return _do_nbs(args)
     parser.error("unknown command")
     return 2
 
@@ -466,6 +478,26 @@ def _do_cninfo(args) -> int:
     return 2
 
 
+def _do_nbs(args) -> int:
+    if args.nbs_cmd == "search":
+        try:
+            rows = nbs_stats.search_indicators(args.keyword, frequency=args.frequency)
+        except net.FetchError as exc:
+            print(f"source_gap: could not search the NBS data library: {exc}", file=sys.stderr)
+            return 1
+        print(f"# nbs {args.frequency} indicators matching {args.keyword!r}: {len(rows)}")
+        for row in rows[:40]:
+            print(f"  {row['indicatorId']}  cid={row['catalogId']}  {str(row['name'])[:52]}")
+            if row.get("mark"):
+                print(f"      口径: {str(row['mark'])[:110]}")
+        if not rows:
+            print("  (no match; try a shorter keyword or another --frequency)")
+        return 0
+
+    print(f"error: unknown nbs command {args.nbs_cmd}", file=sys.stderr)
+    return 2
+
+
 def _do_config(_args) -> int:
     ua, configured = config.contact_ua()
     print("# mira_data config")
@@ -483,7 +515,7 @@ def _do_config(_args) -> int:
         "MIRA_QA_MAX_ITEMS", "MIRA_QA_MAX_UID_PAGES", "MIRA_QA_MAX_FEED_PAGES",
         "MIRA_RATES_MAX_OBSERVATIONS", "MIRA_RATES_WINDOW_DAYS",
         "MIRA_OPTIONS_MAX_CONTRACTS", "MIRA_OPTIONS_SCAN_ROWS", "MIRA_OPTIONS_QUOTE_DAYS",
-        "MIRA_MACRO_MAX_OBSERVATIONS",
+        "MIRA_MACRO_MAX_OBSERVATIONS", "MIRA_NBS_MONTHS", "MIRA_NBS_CACHE_DAYS",
         "MIRA_MARKET_DATA_DEFAULT_SOURCE", "MIRA_LIVE_MARKET_DATA_SOURCE",
         "MIRA_BROKER_DATA_PRIORITY", "MIRA_FUTU_ENABLED_MARKETS",
     ):
@@ -569,10 +601,10 @@ def _do_fetch(args) -> int:
             "ibkr_account_summary": "IBKR_ACCOUNT_SUMMARY",
         }.get(family, symbol.upper())
     print(f"# {display_object} {family} via {label}  ({len(records)} claims)")
-    print(f"{'metric':<22}{'value':>20}  {'unit':<16}{'period':<12}{'tier'}")
+    print(f"{'metric':<30}{'value':>20}  {'unit':<20}{'period':<12}{'tier'}")
     for r in records:
         tier = f"{r.posture.claim_type}/{r.posture.authority_level}"
-        print(f"{r.metric:<22}{_fmt(r.value):>20}  {r.unit:<12}{r.period:<12}{tier}")
+        print(f"{r.metric:<30}{_fmt(r.value):>20}  {r.unit:<20}{r.period:<12}{tier}")
     if res.series:
         print(f"  + series '{res.series['name']}' ({len(res.series['rows'])} rows)")
 
@@ -638,6 +670,11 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "next official release (CPI/PPI/PMI monthly, GDP quarterly); the relay carries "
             "no publish timestamp, so re-read before quoting it as the current print"
+        )
+    elif family == "macro_nbs":
+        must_refresh_if = (
+            "next official release; unpublished periods come back as 无 rather than absent, "
+            "so a value can appear later within the same period code"
         )
     else:
         must_refresh_if = ""

@@ -173,6 +173,14 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    "nbs_stats_api": dict(
+        provider="National Bureau of Statistics of China (国家统计局数据发布库)",
+        speaker="official_agency",
+        license_scope="public_official_statistics", storage_scope="private",
+        redistribution_allowed="derived_only", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(
