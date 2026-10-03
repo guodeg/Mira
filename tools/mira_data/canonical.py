@@ -149,6 +149,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free_with_key",
         latency_class="delayed",
     ),
+    # 董监高持股变动 through the Eastmoney relay: the A-share counterpart of a Form 4 feed. An
+    # aggregator is the publisher of this structured copy, so it is L5 and the claim is the
+    # reported metric; the issuer's own filing at the exchange/CNINFO is the L2 upgrade path.
+    "em_executive_holdings": Posture(
+        source_id="eastmoney_insider_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     "hithink_finance_financials": Posture(
         source_id="hithink_finance_financials_api",
         source_class="aggregated_financial_data",

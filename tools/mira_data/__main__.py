@@ -16,10 +16,10 @@ import sys
 
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
-                       eastmoney_consensus, eastmoney_macro, exchange_disclosure,
-                       exchange_margin, exchange_northbound, futu_opend, hithink_finance,
-                       hithink_options, hithink_valuation, ibkr_gateway, investor_qa, nbs_stats,
-                       news_pointers, sec_companyfacts, yahoo_chart)
+                       eastmoney_consensus, eastmoney_macro, em_insider,
+                       exchange_disclosure, exchange_margin, exchange_northbound, futu_opend,
+                       hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
+                       investor_qa, nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
 # Families that are mainland-A-share only and take a thscode-style symbol.
@@ -28,9 +28,11 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
                      "index_valuation", "exchange_announcements", "northbound_turnover",
-                     "shareholder_count", "ir_activity", "valuation_snapshot")
+                     "shareholder_count", "ir_activity", "valuation_snapshot",
+                     "executive_holdings")
 # Families that take the announcement-window flags (--since/--until/--max-items).
-_WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity")
+_WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity",
+                    "executive_holdings")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
@@ -133,6 +135,8 @@ FETCHERS = {
     "valuation_snapshot": ("Stock-level valuation ratios PE/PB/PS/PCF, up to 100 names (L5)",
                            hithink_valuation.fetch_valuation_snapshot,
                            hithink_valuation.ENDPOINT),
+    "executive_holdings": ("董监高持股变动 (executive shareholding changes) relay (L5)",
+                           em_insider.fetch_executive_holdings, em_insider.ENDPOINT),
 }
 
 
@@ -749,6 +753,8 @@ def _do_fetch(args) -> int:
     elif family == "exchange_announcements":
         kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
     elif family == "ir_activity":
+        kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
+    elif family == "executive_holdings":
         kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
     elif family == "investor_qa":
         kwargs.update(days=args.days, max_items=args.max_items)
