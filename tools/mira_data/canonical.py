@@ -162,6 +162,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 限售解禁 (lock-up expiry) on the same relay. Only the date, the share type and the batch
+    # holder count are claimed, because the relay's quantity/ratio/value fields did not reconcile
+    # in the live probe; those travel as raw vendor data with a unit caveat.
+    "em_lockup_schedule": Posture(
+        source_id="eastmoney_lockup_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     "hithink_finance_financials": Posture(
         source_id="hithink_finance_financials_api",
         source_class="aggregated_financial_data",

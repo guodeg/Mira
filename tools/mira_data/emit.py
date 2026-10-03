@@ -237,6 +237,14 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="medium",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    "eastmoney_lockup_api": dict(
+        provider="Eastmoney datacenter (lock-up expiry schedule)",
+        speaker="aggregator",
+        license_scope="vendor_terms_unverified", storage_scope="private",
+        redistribution_allowed="unknown", readiness_impact="supports_cross_check_only",
+        freshness_status="acceptable_for_period", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(
