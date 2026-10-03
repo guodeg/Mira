@@ -10,6 +10,8 @@ Families wired in P1:
 from __future__ import annotations
 
 import argparse
+import os
+import re
 import sys
 
 from . import config, fundamentals, net, screening, technical
@@ -227,6 +229,21 @@ def main(argv: list[str] | None = None) -> int:
     cninfo = sub.add_parser("cninfo", help="read-only CNINFO disclosure-portal utilities")
     cninfo_sub = cninfo.add_subparsers(dest="cninfo_cmd", required=True)
     cninfo_sub.add_parser("probe", help="check the org-id map and a live announcement query")
+    cninfo_text = cninfo_sub.add_parser(
+        "text", help="find filings by title and extract their PDF text layer")
+    cninfo_text.add_argument("symbol", help="A-share code, e.g. 688008")
+    cninfo_text.add_argument("--title", default=None,
+                             help="only filings whose title contains this substring")
+    cninfo_text.add_argument("--since", default=None, help="YYYY-MM-DD window start")
+    cninfo_text.add_argument("--until", default=None, help="YYYY-MM-DD window end")
+    cninfo_text.add_argument("--max-items", type=int, default=None,
+                             help="cap on indexed announcements scanned")
+    cninfo_text.add_argument("--max-pages", type=int, default=None,
+                             help="page cap per PDF (default 40)")
+    cninfo_text.add_argument("--limit", type=int, default=None,
+                             help="cap on PDFs actually extracted (default 3)")
+    cninfo_text.add_argument("--out", default=None,
+                             help="directory for the extracted .txt files")
 
     nbs = sub.add_parser("nbs", help="read-only National Bureau of Statistics utilities")
     nbs_sub = nbs.add_subparsers(dest="nbs_cmd", required=True)
@@ -518,8 +535,66 @@ def _do_cninfo(args) -> int:
         print("  mode               : public_readonly (no key, no cookie)")
         return 0
 
+    if args.cninfo_cmd == "text":
+        return _do_cninfo_text(args)
+
     print(f"error: unknown cninfo command {args.cninfo_cmd}", file=sys.stderr)
     return 2
+
+
+def _do_cninfo_text(args) -> int:
+    """Find filings by title substring, then extract their PDF text layers."""
+    limit = args.limit if args.limit is not None else 3
+    max_pages = args.max_pages if args.max_pages is not None else 40
+    try:
+        rows = cninfo_disclosure.find_announcements(
+            args.symbol, since=args.since, until=args.until,
+            title_contains=args.title, max_items=args.max_items)
+    except net.FetchError as exc:
+        print(f"source_gap: could not read the CNINFO announcement index: {exc}",
+              file=sys.stderr)
+        return 1
+
+    if not rows:
+        print(f"source_gap: no announcement for {args.symbol} matched "
+              f"title~{args.title!r} in the requested window", file=sys.stderr)
+        return 1
+
+    print(f"# cninfo pdf text — {args.symbol}, {len(rows)} filing(s) matched"
+          + (f" title~{args.title!r}" if args.title else ""))
+    out_dir = args.out
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    extracted = 0
+    failures = 0
+    for row in rows:
+        if extracted >= limit:
+            remaining = len(rows) - extracted - failures
+            print(f"  ... {remaining} more matched; raise --limit to extract them")
+            break
+        label = f"{row['date_bj']} {row['announcementTitle']}"
+        try:
+            got = cninfo_disclosure.extract_pdf_text(
+                row["pdf_url"], max_pages=max_pages)
+        except net.FetchError as exc:
+            failures += 1
+            # A gap is reported as a gap. It is never rendered as a successful
+            # zero-character extraction, which would read like an absent section.
+            print(f"  GAP   {label}\n        {exc}")
+            continue
+        extracted += 1
+        note = f" (first {got['pages_read']}/{got['page_count']} pages)" if got["truncated"] else ""
+        print(f"  OK    {label}\n        {got['chars']:,} chars{note}")
+        if out_dir:
+            safe = re.sub(r"[^\w\u4e00-\u9fff]+", "_", row["announcementTitle"])[:80]
+            path = os.path.join(out_dir, f"{row['date_bj']}_{safe}.txt")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(got["text"])
+            print(f"        -> {path}")
+
+    print(f"  extracted {extracted}, gapped {failures} of {len(rows)} matched")
+    return 0 if extracted else 1
 
 
 def _do_nbs(args) -> int:

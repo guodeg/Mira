@@ -56,6 +56,7 @@ Guessing a token would be worse than admitting ``other``.
 from __future__ import annotations
 
 import datetime as _dt
+import io as _io
 import json
 import os
 import re
@@ -479,6 +480,118 @@ def _id_sort_key(value) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+# --------------------------------------------------------------------------- #
+# PDF body extraction (explicit, bounded, never silent)
+# --------------------------------------------------------------------------- #
+
+PDF_MAX_BYTES = 40 * 1024 * 1024
+PDF_DEFAULT_MAX_PAGES = 40
+
+
+def _require_pypdf():
+    try:
+        import pypdf  # type: ignore
+    except ImportError as exc:                       # pragma: no cover - depends on env
+        raise net.FetchError(
+            "cninfo_dependency_gap: install the optional dependency 'pypdf' to read "
+            "announcement PDF bodies (no PDF parser is in the stdlib)") from exc
+    return pypdf
+
+
+def extract_pdf_text(
+    url: str,
+    *,
+    max_pages: int = PDF_DEFAULT_MAX_PAGES,
+    max_bytes: int = PDF_MAX_BYTES,
+) -> dict:
+    """Download one CNINFO PDF and return its text layer.
+
+    Returns ``{"text", "page_count", "pages_read", "truncated", "chars", "url"}``.
+
+    Raises ``net.FetchError`` with a machine-routable prefix when the body cannot be
+    turned into text:
+
+    - ``cninfo_dependency_gap``  — no PDF library installed.
+    - ``cninfo_pdf_too_large``   — declared or actual size exceeds ``max_bytes``.
+    - ``cninfo_pdf_unparsable``  — the bytes are not a readable PDF.
+    - ``cninfo_pdf_text_gap``    — parsed fine but yielded no text on any page read
+      (typically an image-only scan). **Never** returns empty text silently.
+    """
+    pypdf = _require_pypdf()
+    raw = net.get(url, headers=HEADERS, timeout=_timeout())
+    if len(raw) > max_bytes:
+        raise net.FetchError(
+            f"cninfo_pdf_too_large: {len(raw)} bytes exceeds the {max_bytes}-byte cap "
+            f"for {url}; raise max_bytes deliberately rather than by accident")
+
+    try:
+        reader = pypdf.PdfReader(_io.BytesIO(raw))
+        page_count = len(reader.pages)
+    except Exception as exc:                         # noqa: BLE001 - vendor parser
+        raise net.FetchError(f"cninfo_pdf_unparsable: {url}: {exc}") from exc
+
+    pages_read = min(page_count, max_pages)
+    chunks: list[str] = []
+    for index in range(pages_read):
+        try:
+            chunks.append(reader.pages[index].extract_text() or "")
+        except Exception as exc:                     # noqa: BLE001 - per-page recovery
+            # One bad page must not discard the readable ones, but the loss is recorded.
+            chunks.append(f"[[page {index + 1} extract failed: {exc}]]")
+
+    text = "\n".join(chunks)
+    if not text.strip():
+        raise net.FetchError(
+            f"cninfo_pdf_text_gap: {url} parsed to {page_count} pages but yielded no "
+            "text layer on the first "
+            f"{pages_read} page(s); this is an image-only scan, not an empty document")
+    return {
+        "text": text,
+        "page_count": page_count,
+        "pages_read": pages_read,
+        "truncated": pages_read < page_count,
+        "chars": len(text),
+        "url": url,
+    }
+
+
+def find_announcements(
+    symbol: str,
+    *,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    title_contains: Optional[str] = None,
+    max_items: Optional[int] = None,
+) -> list[dict]:
+    """Announcement metadata rows for one name, optionally filtered by title substring.
+
+    A thin convenience over the same index query :func:`fetch_issuer_disclosures`
+    uses, for the common "find the filing that discusses X, then extract it" flow.
+    Returns the raw index dicts (with ``announcementTitle`` cleaned in place) so a
+    caller can hand ``pdf_url(item['adjunctUrl'])`` straight to
+    :func:`extract_pdf_text`.
+    """
+    thscode = resolve_thscode(symbol)
+    sec_code, _board = thscode.split(".")
+    org = resolve_org_id(sec_code)
+    until = until or _dt.date.today().isoformat()
+    since = since or (_dt.date.fromisoformat(until) - _dt.timedelta(days=DEFAULT_DAYS)).isoformat()
+
+    rows: list[dict] = []
+    for item in _iter_announcements(
+        stock=f"{sec_code},{org}", se_date=f"{since}~{until}",
+        max_items=_max_items(max_items),
+    ):
+        if title_contains and title_contains not in clean_title(item.get("announcementTitle")):
+            continue
+        item = dict(item)
+        item["announcementTitle"] = clean_title(item.get("announcementTitle"))
+        item["date_bj"] = bj_date(item.get("announcementTime"))
+        item["pdf_url"] = pdf_url(item.get("adjunctUrl"))
+        rows.append(item)
+    return rows
 
 
 def probe() -> dict:
