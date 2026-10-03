@@ -27,7 +27,8 @@ _A_SHARE_PREFIXES = ("hithink_", "cninfo_")
 _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
-                     "index_valuation", "exchange_announcements", "northbound_turnover")
+                     "index_valuation", "exchange_announcements", "northbound_turnover",
+                     "shareholder_count")
 # Families that take the announcement-window flags (--since/--until/--max-items).
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
@@ -123,6 +124,9 @@ FETCHERS = {
     "northbound_turnover": ("Exchange-published Stock Connect turnover, SSE/SZSE (L2)",
                             exchange_northbound.fetch_northbound_turnover,
                             exchange_northbound.ENDPOINT),
+    "shareholder_count": ("Shareholder count from the filed periodic report body (L1)",
+                          cninfo_disclosure.fetch_shareholder_count,
+                          "https://static.cninfo.com.cn/finalpage/{symbol}.PDF"),
 }
 
 

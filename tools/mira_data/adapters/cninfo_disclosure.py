@@ -608,3 +608,124 @@ def probe() -> dict:
         "sample_total": payload.get("totalAnnouncement"),
         "sample_first": clean_title(announcements[0].get("announcementTitle")) if announcements else None,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Shareholder count lifted out of the filed report body
+# --------------------------------------------------------------------------- #
+
+# Verified against a live filing (贵州茅台 2026 半年度报告, 110 pages): the label and the figure
+# come out of the PDF text layer adjacent, as
+#     (一) 股东总数： 截至报告期末普通股股东总数(户) 296,404
+# which is why exactly this field is extracted and the shareholder *tables* are not.
+SHAREHOLDER_COUNT_PATTERNS = (
+    r"截至报告期末普通股股东总数\s*[（(]?\s*户\s*[)）]?\s*[:：]?\s*([\d,，]+)",
+    r"股东总数\s*[（(]\s*户\s*[)）]\s*[:：]?\s*([\d,，]+)",
+    r"普通股股东总数\s*[:：]?\s*([\d,，]+)\s*户",
+)
+SHAREHOLDER_TABLE_CAVEAT = (
+    "only the shareholder count is extracted: the top-ten shareholder and 限售 tables lose their "
+    "column binding in the PDF text layer (headers split as '期末持股数 量', values in reading "
+    "order), so they are not claimed from text rather than guessed; read the report PDF itself")
+# Order matters: 半年度报告 contains the substring 年度报告, so the more specific markers must
+# be tested first or a half-year report would be dated as a year end.
+REPORT_PERIODS = (("半年度报告", "-06-30"), ("第一季度报告", "-03-31"),
+                  ("第三季度报告", "-09-30"), ("年度报告", "-12-31"))
+
+
+def report_period_end(title: str) -> str:
+    """Period end implied by a periodic-report title, or '' when the title does not say."""
+    text = clean_title(title)
+    year = re.search(r"(20\d{2})\s*年", text)
+    if not year or "摘要" in text:
+        return ""
+    for marker, suffix in REPORT_PERIODS:
+        if marker in text:
+            return f"{year.group(1)}{suffix}"
+    return ""
+
+
+def _shareholder_count(text: str) -> tuple[float, str, int]:
+    for pattern in SHAREHOLDER_COUNT_PATTERNS:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        raw = match.group(1).replace(",", "").replace("，", "")
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if value <= 0:
+            continue
+        start = max(0, match.start() - 60)
+        return value, re.sub(r"\s+", " ", text[start:match.end()]).strip(), match.start()
+    return 0.0, "", -1
+
+
+def fetch_shareholder_count(
+    symbol: str,
+    *,
+    as_of: Optional[str] = None,
+    market_scope: str = "CN",
+    max_pages: int = PDF_DEFAULT_MAX_PAGES,
+) -> FetchResult:
+    """Shareholder count from the most recent periodic report, with its verbatim source line.
+
+    The claim is deliberately narrow: one figure the filing states outright, with the sentence
+    it came from kept in provenance so a reader can check it, and an explicit note that the
+    shareholder tables are *not* extracted from the text layer.
+    """
+    as_of = as_of or _dt.date.today().isoformat()
+    thscode = resolve_thscode(symbol)
+    candidates: list[dict] = []
+    for marker in ("年度报告", "半年度报告", "季度报告"):
+        try:
+            candidates.extend(find_announcements(symbol, until=as_of, title_contains=marker,
+                                                 max_items=12))
+        except net.FetchError:
+            continue
+    reports = [row for row in candidates
+               if "摘要" not in row["announcementTitle"] and "英文" not in row["announcementTitle"]]
+    if not reports:
+        raise net.FetchError(
+            f"cninfo_source_gap: no periodic report found for {thscode} up to {as_of}")
+    reports.sort(key=lambda row: row["date_bj"], reverse=True)
+
+    posture = POSTURES["cninfo_holders"]
+    errors: list[str] = []
+    for report in reports[:3]:
+        try:
+            got = extract_pdf_text(report["pdf_url"], max_pages=max_pages)
+        except net.FetchError as exc:
+            errors.append(f"{report['announcementTitle']}: {exc}")
+            continue
+        found = _shareholder_count(got["text"])
+        if not found[1]:
+            errors.append(f"{report['announcementTitle']}: shareholder total not stated")
+            continue
+        value, sentence, offset = found
+        period = report_period_end(report["announcementTitle"])
+        return FetchResult([CanonicalRecord(
+            family="ownership_short_interest", research_object=thscode,
+            market_scope=market_scope, metric="shareholder_count", value=value,
+            unit="households", period=period or report["date_bj"],
+            period_type="point_in_time", as_of_date=as_of, source_date=report["date_bj"],
+            posture=posture, url_or_path=report["pdf_url"],
+            claim_text=(f"{thscode} {report['announcementTitle']} 披露的普通股股东总数 "
+                        f"{int(value):,} 户" + (f"（{period}）" if period else "")),
+            provenance={
+                "reportTitle": report["announcementTitle"],
+                "reportDisclosedOn": report["date_bj"], "reportUrl": report["pdf_url"],
+                "periodBasis": ("derived from the report title" if period else
+                                "not derivable from the title; the disclosure date is used"),
+                "matchedSentence": sentence[:200], "charOffset": offset,
+                "pagesRead": got["pages_read"], "pageCount": got["page_count"],
+                "extractionMethod": "pdf_text_layer_regex/v1",
+                "tableCaveat": SHAREHOLDER_TABLE_CAVEAT,
+                "bodyRetrieval": ("filed body parsed locally; only the figure and this sentence "
+                                  "are retained"),
+            },
+        )])
+    raise net.FetchError(
+        "cninfo_source_gap: no shareholder total reachable in the last three periodic reports; "
+        + "; ".join(errors[:3]))

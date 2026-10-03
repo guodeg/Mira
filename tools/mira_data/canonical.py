@@ -330,6 +330,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Shareholder count lifted from the filed periodic report: a metric the issuer states
+    # outright, so L1 reported_fact rather than a derived figure. Same source row as the
+    # announcement index, because the body comes from that same filing.
+    "cninfo_holders": Posture(
+        source_id="cninfo_announcement_api",
+        source_class="issuer_primary_disclosure",
+        authority_level="L1",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

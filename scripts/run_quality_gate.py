@@ -40,6 +40,7 @@ PY_COMPILE_TARGETS = [
     "scripts/test_mira_data_options.py",
     "scripts/test_mira_data_rates.py",
     "scripts/test_mira_data_sec.py",
+    "scripts/test_mira_data_shareholder.py",
     "scripts/test_repo_validation_contracts.py",
     "scripts/validate_release.py",
 ]
@@ -109,6 +110,7 @@ def build_checks(args: argparse.Namespace) -> list[tuple[str, list[str], set[int
             ("mira_data_options_tests", [sys.executable, "scripts/test_mira_data_options.py"], {0}, True),
             ("mira_data_rates_tests", [sys.executable, "scripts/test_mira_data_rates.py"], {0}, True),
             ("mira_data_sec_tests", [sys.executable, "scripts/test_mira_data_sec.py"], {0}, True),
+            ("mira_data_shareholder_tests", [sys.executable, "scripts/test_mira_data_shareholder.py"], {0}, True),
             ("repo_validation_contract_tests", [sys.executable, "scripts/test_repo_validation_contracts.py"], {0}, True),
             ("repo_validation", [sys.executable, "scripts/validate_repo.py"], {0}, True),
         ]
