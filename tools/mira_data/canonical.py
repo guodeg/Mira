@@ -136,6 +136,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free_with_key",
         latency_class="delayed",
     ),
+    # Stock-level valuation ratios (PE/PB/PS/PCF) on the same licensed route. The family also
+    # has an index-level channel from the CSI compiler; this is the per-name half, and it is the
+    # vendor's ratio computation rather than an issuer figure, so it stays market pricing at L5.
+    "hithink_finance_valuation": Posture(
+        source_id="hithink_finance_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="market_pricing",
+        evidence_category="market_pricing",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="delayed",
+    ),
     "hithink_finance_financials": Posture(
         source_id="hithink_finance_financials_api",
         source_class="aggregated_financial_data",

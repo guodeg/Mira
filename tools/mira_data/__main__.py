@@ -18,7 +18,7 @@ from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
                        eastmoney_consensus, eastmoney_macro, exchange_disclosure,
                        exchange_margin, exchange_northbound, futu_opend, hithink_finance,
-                       hithink_options, ibkr_gateway, investor_qa, nbs_stats,
+                       hithink_options, hithink_valuation, ibkr_gateway, investor_qa, nbs_stats,
                        news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
 
@@ -28,7 +28,7 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
                      "index_valuation", "exchange_announcements", "northbound_turnover",
-                     "shareholder_count", "ir_activity")
+                     "shareholder_count", "ir_activity", "valuation_snapshot")
 # Families that take the announcement-window flags (--since/--until/--max-items).
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
@@ -130,6 +130,9 @@ FETCHERS = {
     "ir_activity": ("Filed IR-activity records (调研/业绩说明会) as transcript claims (L1)",
                     cninfo_disclosure.fetch_ir_activity,
                     "https://static.cninfo.com.cn/finalpage/{symbol}.PDF"),
+    "valuation_snapshot": ("Stock-level valuation ratios PE/PB/PS/PCF, up to 100 names (L5)",
+                           hithink_valuation.fetch_valuation_snapshot,
+                           hithink_valuation.ENDPOINT),
 }
 
 
