@@ -729,3 +729,138 @@ def fetch_shareholder_count(
     raise net.FetchError(
         "cninfo_source_gap: no shareholder total reachable in the last three periodic reports; "
         + "; ".join(errors[:3]))
+
+
+# --------------------------------------------------------------------------- #
+# 投资者关系活动记录表 — the filed transcript of an IR activity / 业绩说明会
+# --------------------------------------------------------------------------- #
+
+# Verified against a live filing (宁波精达 2026 年半年度业绩说明会, 4 pages). The form prints its
+# labels **without colons** ("时间 2026 年 9 月 29 日"), the activity category as a checkbox list
+# ("□特定对象调研 ☑业绩说明会 …"), and the Q&A as numbered questions each followed by 答：.
+IR_ACTIVITY_TITLE = "投资者关系活动记录表"
+IR_CATEGORIES = ("特定对象调研", "分析师会议", "媒体采访", "业绩说明会", "新闻发布会",
+                 "路演活动", "现场参观", "其他")
+IR_ANSWER_LIMIT = 200
+IR_QUESTION_LIMIT = 120
+IR_LABEL_PATTERNS = {
+    "number": r"编\s*号\s*[:：]\s*([0-9A-Za-z\-—]+)",
+    "date": r"时\s*间\s*[:：]?\s*(20\d{2}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)",
+    "venue": r"地\s*点\s*[:：]?\s*([^\n]{2,60})",
+    "participants": r"参与单位名称及?\s*人员姓名\s*([^\n]{2,120})",
+    "receptionists": r"上市公司接待人\s*员姓名\s*([^\n]{2,160})",
+}
+IR_NOT_EXTRACTED = ("free-text colour (tone, hedging, evasion) is not extracted; only the "
+                    "filed wording is quoted")
+
+
+def _ir_field(text: str, pattern: str) -> str:
+    match = re.search(pattern, text)
+    return re.sub(r"\s+", " ", match.group(1)).strip(" ：:") if match else ""
+
+
+def parse_ir_activity(text: str) -> dict:
+    """Pull the activity header and the numbered Q&A out of a filed IR activity record."""
+    squashed = re.sub(r"[ \t]+", " ", text)
+    header = {name: _ir_field(squashed, pattern)
+              for name, pattern in IR_LABEL_PATTERNS.items()}
+    checkbox = re.search(r"([☑√])\s*(" + "|".join(IR_CATEGORIES) + ")", squashed)
+    header["category"] = checkbox.group(2) if checkbox else ""
+    header["categories_all"] = [name for name in IR_CATEGORIES
+                                if re.search(r"[☑√]\s*" + name, squashed)]
+
+    # Questions are numbered; every answer starts with 答：. Split on the answer marker and take
+    # the last numbered item before it as the question.
+    pairs: list[tuple[str, str]] = []
+    chunks = squashed.split("答：")
+    for index in range(1, len(chunks)):
+        answer = re.split(r"\n\s*\d+[\.、]", chunks[index])[0].strip()
+        prompt = chunks[index - 1]
+        numbered = re.findall(r"(?:^|\n)\s*\d+[\.、]\s*([^\n]{4,})", prompt)
+        question = (numbered[-1] if numbered else prompt.strip().split("\n")[-1]).strip()
+        if not answer or not question:
+            continue
+        pairs.append((re.sub(r"\s+", " ", question), re.sub(r"\s+", " ", answer)))
+    header["qa_pairs"] = pairs
+    return header
+
+
+def fetch_ir_activity(
+    symbol: str,
+    *,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    max_items: Optional[int] = None,
+    as_of: Optional[str] = None,
+    market_scope: str = "CN",
+    max_pages: int = PDF_DEFAULT_MAX_PAGES,
+) -> FetchResult:
+    """Filed IR activity records (调研 / 业绩说明会) as ``transcript_claim`` rows.
+
+    One record per answered question, because the claim is what the company *said*, while the
+    activity header (category, participants, date, venue, receptionists) travels in provenance
+    on every record. Texts are extracts, never full copies, and nothing is inferred from tone.
+    """
+    as_of = as_of or _dt.date.today().isoformat()
+    thscode = resolve_thscode(symbol)
+    cap = _max_items(max_items)
+    until = until or as_of
+    since = since or (_dt.date.fromisoformat(until) - _dt.timedelta(days=DEFAULT_DAYS)).isoformat()
+    # The title filter runs after a bounded index read, so ask for a wide page and filter here:
+    # a small cap would silently never reach the record (this bit the first probe).
+    rows = [row for row in find_announcements(symbol, until=until, max_items=max(cap * 10, 100))
+            if IR_ACTIVITY_TITLE in row["announcementTitle"]
+            and row["date_bj"] >= since]
+    if not rows:
+        raise net.FetchError(
+            f"cninfo_source_gap: no 投资者关系活动记录表 for {thscode} between {since} and "
+            f"{until}; Shenzhen names file these on the 互动易 platform instead of as "
+            "announcements, so this channel covers Shanghai filers")
+
+    posture = POSTURES["cninfo_ir_activity"]
+    errors: list[str] = []
+    for row in sorted(rows, key=lambda item: item["date_bj"], reverse=True):
+        try:
+            got = extract_pdf_text(row["pdf_url"], max_pages=max_pages)
+        except net.FetchError as exc:
+            errors.append(f"{row['announcementTitle']}: {exc}")
+            continue
+        parsed = parse_ir_activity(got["text"])
+        pairs = parsed.get("qa_pairs") or []
+        if not pairs:
+            errors.append(f"{row['announcementTitle']}: no numbered Q&A in the text layer")
+            continue
+        records = []
+        for index, (question, answer) in enumerate(pairs[:cap], start=1):
+            records.append(CanonicalRecord(
+                family="transcript_claim", research_object=thscode,
+                market_scope=market_scope, metric="ir_qa_answer",
+                value=f"{row.get('announcementId') or row['date_bj']}-{index}",
+                unit="qa_id", period=parsed.get("date") or row["date_bj"],
+                period_type="point_in_time", as_of_date=as_of, source_date=row["date_bj"],
+                posture=posture, url_or_path=row["pdf_url"],
+                claim_text=(f"{thscode} {parsed.get('date') or row['date_bj']} "
+                            f"{parsed.get('category') or '投资者关系活动'} 问答："
+                            f"{answer[:IR_ANSWER_LIMIT]}"),
+                provenance={
+                    "filingTitle": row["announcementTitle"], "filingUrl": row["pdf_url"],
+                    "activityNumber": parsed.get("number"), "activityDate": parsed.get("date"),
+                    "activityCategory": parsed.get("category"),
+                    "categoriesAll": parsed.get("categories_all"),
+                    "participants": parsed.get("participants"),
+                    "venue": parsed.get("venue"),
+                    "receptionists": parsed.get("receptionists"),
+                    "question": question[:IR_QUESTION_LIMIT],
+                    "answerChars": len(answer), "qaIndex": index, "qaCount": len(pairs),
+                    "pagesRead": got["pages_read"], "pageCount": got["page_count"],
+                    "extractionMethod": "pdf_text_layer_form/v1",
+                    "notExtracted": IR_NOT_EXTRACTED,
+                    "bodyRetrieval": ("filed body parsed locally; the question and a capped "
+                                      "answer extract are retained"),
+                },
+            ))
+        if records:
+            return FetchResult(records)
+    raise net.FetchError(
+        "cninfo_source_gap: no readable 投资者关系活动记录表 for " + thscode + "; "
+        + "; ".join(errors[:3]))

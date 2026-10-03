@@ -28,9 +28,9 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "investor_qa", "macro_rates", "option_surface", "macro_china",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
                      "index_valuation", "exchange_announcements", "northbound_turnover",
-                     "shareholder_count")
+                     "shareholder_count", "ir_activity")
 # Families that take the announcement-window flags (--since/--until/--max-items).
-_WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements")
+_WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
@@ -127,6 +127,9 @@ FETCHERS = {
     "shareholder_count": ("Shareholder count from the filed periodic report body (L1)",
                           cninfo_disclosure.fetch_shareholder_count,
                           "https://static.cninfo.com.cn/finalpage/{symbol}.PDF"),
+    "ir_activity": ("Filed IR-activity records (调研/业绩说明会) as transcript claims (L1)",
+                    cninfo_disclosure.fetch_ir_activity,
+                    "https://static.cninfo.com.cn/finalpage/{symbol}.PDF"),
 }
 
 
@@ -741,6 +744,8 @@ def _do_fetch(args) -> int:
     elif family in {"margin_balance", "margin_market"}:
         kwargs["date"] = args.date
     elif family == "exchange_announcements":
+        kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
+    elif family == "ir_activity":
         kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
     elif family == "investor_qa":
         kwargs.update(days=args.days, max_items=args.max_items)

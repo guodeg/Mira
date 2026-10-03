@@ -343,6 +343,19 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # Filed IR-activity record (投资者关系活动记录表): what the company said in a 调研 / 业绩说明会.
+    # The channel is the issuer's own filing (L1) and the content is company commentary, so the
+    # claim stays company_claim / company_statement exactly as on the 互动易 platform.
+    "cninfo_ir_activity": Posture(
+        source_id="cninfo_announcement_api",
+        source_class="issuer_primary_disclosure",
+        authority_level="L1",
+        claim_type="company_claim",
+        evidence_category="company_statement",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 
