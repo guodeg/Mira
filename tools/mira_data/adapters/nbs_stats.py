@@ -314,6 +314,46 @@ SERIES: dict[str, Series] = {
                                Metric("money_supply_m0_yoy",
                                       "db7891fb8f3c4eb2a4d71a9955eba8c7", "percent"),
                            ]),
+    # Industry output. The L2 review found that most of what the industry associations publish
+    # as *production* is already official statistics, so it ships here rather than needing a new
+    # source: each indicator has its own catalog, hence one series per line. What the agencies do
+    # not publish - association sales, installations, inventory and opening rates - still needs
+    # the associations themselves.
+    "AUTO_OUTPUT": Series("AUTO_OUTPUT", "汽车产量", "monthly",
+                          "508bcbda312b4b1d9a6aba48f6c5c7eb", [
+                              Metric("auto_output", "043652ba8bf34fd59c1092facd0c60d4",
+                                     "10k_vehicles"),
+                          ]),
+    "NEV_OUTPUT": Series("NEV_OUTPUT", "新能源汽车产量", "monthly",
+                         "8dedd34d41004a03ae790313a34cb27f", [
+                             Metric("new_energy_vehicle_output",
+                                    "69dea360563d42f39881a070de56dbee", "10k_vehicles"),
+                         ]),
+    "CRUDE_STEEL": Series("CRUDE_STEEL", "粗钢产量", "monthly",
+                          "c72e324de29447e1a6917acd99c2d5ac", [
+                              Metric("crude_steel_output", "5f6643b26ae348baa1443f084cb3010e",
+                                     "10k_tonnes"),
+                          ]),
+    "STEEL_PRODUCTS": Series("STEEL_PRODUCTS", "钢材产量", "monthly",
+                             "a440d16b065c4c3b8c321378e56c2958", [
+                                 Metric("steel_products_output",
+                                        "fe4e53f205d74b8e98f501b75cb27442", "10k_tonnes"),
+                             ]),
+    "NONFERROUS_OUTPUT": Series("NONFERROUS_OUTPUT", "十种有色金属产量", "monthly",
+                                "2315d2792e91403a8f74d132e61c68a9", [
+                                    Metric("nonferrous_output",
+                                           "1a16966584594bc9bacc9c31b332e5f2", "10k_tonnes"),
+                                ]),
+    "POWER_GENERATION": Series("POWER_GENERATION", "发电量（总）", "monthly",
+                               "1abb1cfea75847b8bf1a0e395d85966b", [
+                                   Metric("power_generation", "baafe3a9a09d4b39a366e5b625574aea",
+                                          "100m_kwh"),
+                               ]),
+    "CAPACITY_UTILIZATION": Series("CAPACITY_UTILIZATION", "工业产能利用率", "quarterly",
+                                   "56a7def4ab0749d8800eab2415f90b54", [
+                                       Metric("capacity_utilization",
+                                              "57ae79552303418087eee8f4f35b4368", "percent"),
+                                   ]),
     "GDP": Series("GDP", "国内生产总值", "quarterly",
                   "28d936104e304aa191e338eb82b6dc09", [
                       Metric("gdp_quarterly", "d22612f09aeb4241bc557ef0ac61b3ba",
