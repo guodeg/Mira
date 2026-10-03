@@ -21,6 +21,14 @@ temp/
 downloads/
 exports/
 
+# Case-local raw payloads and re-derivable bulk extracts. Cases keep their canonical
+# artifacts tracked but not the vendor JSON, extracted filing text or vendored
+# third-party libraries they were built from (data/DATA_POLICY: raw stays private).
+cases/*/raw/
+cases/*/pdftext/
+cases/*/pdftext_via_toolkit/
+cases/*/_pylibs/
+
 # Python/tooling
 __pycache__/
 *.py[cod]

@@ -395,6 +395,35 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 限售股份变动情况 lifted from the periodic report body: the issuer's own table of
+    # restricted-share movement (年初/解除/增加/年末 plus the 限售原因 and 解除日期), so a
+    # reported metric at L1 - the same source row as the announcement index, because the
+    # body comes from that same filing.
+    "cninfo_lockup_change": Posture(
+        source_id="cninfo_announcement_api",
+        source_class="issuer_primary_disclosure",
+        authority_level="L1",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="filing_cycle",
+    ),
+    # 十大股东 / 十大流通股东 relayed by an aggregator. The content is the issuer's own
+    # disclosed table, but the publisher is the relay rather than the exchange or the portal,
+    # so the tier is L5 reported_fact with a medium-confidence aggregator speaker - the same
+    # treatment em_insider and em_lockup get, and every record names the issuer's filing as
+    # the L1 route to the same numbers.
+    "em_shareholders": Posture(
+        source_id="eastmoney_shareholders_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
 }
 
 

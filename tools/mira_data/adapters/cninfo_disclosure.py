@@ -73,6 +73,13 @@ TOPSEARCH_URL = "http://www.cninfo.com.cn/new/information/topSearch/query"
 ORGID_MAP_URL = "http://www.cninfo.com.cn/new/data/szse_stock.json"
 PDF_BASE = "http://static.cninfo.com.cn/"
 ENDPOINT = "cninfo://hisAnnouncement/query/{thscode}"
+# The portal's full-text search index. It is a DIFFERENT index from the announcement feed
+# above: 投资者关系活动记录表 is absent from `hisAnnouncement/query` for Shenzhen (and for the
+# HK-line "海外监管公告" copies) but present here, which is why the IR channel needs both.
+FULLTEXT_SEARCH_URL = "http://www.cninfo.com.cn/new/fulltextSearch/full"
+# pageSize is silently capped at 100 regardless of what is sent, so asking for more only
+# misreports the page count.
+FULLTEXT_PAGE_SIZE = 100
 
 # Any browser UA clears the (light) throttle; a bare urllib UA is riskier.
 BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -492,6 +499,10 @@ def _id_sort_key(value) -> int:
 
 PDF_MAX_BYTES = 40 * 1024 * 1024
 PDF_DEFAULT_MAX_PAGES = 40
+# Reading a table inside a periodic report body needs a far larger page window than reading
+# a leading section: 海光信息's 限售股份变动情况 sits on page 103 of a 231-page annual report, so
+# the 40-page default truncates before it. The byte cap above stays the real safety limit.
+PDF_SCAN_MAX_PAGES = 400
 
 
 def _require_pypdf():
@@ -612,6 +623,363 @@ def probe() -> dict:
         "sample_total": payload.get("totalAnnouncement"),
         "sample_first": clean_title(announcements[0].get("announcementTitle")) if announcements else None,
     }
+
+
+# --------------------------------------------------------------------------- #
+# 限售股份变动情况 — the one filing table that is safely recoverable
+# --------------------------------------------------------------------------- #
+#
+# The L1 review listed three structured fields the plain text layer destroys. Two are now
+# served elsewhere (股东户数 is lifted by regex; the 前十名股东 tables come from a relay), and
+# this section covers the third: the issuer's per-holder restricted-share table.
+#
+# Which extractor, and why — measured, not assumed
+# ------------------------------------------------
+# Both pypdf modes were run against live filings before choosing:
+#
+# - **plain** (`extract_text()`) explodes the table into reading-order fragments — the header
+#   arrives as `是否有 履行期 限` and numbers lose their column binding. Unusable.
+# - **layout** (`extraction_mode="layout"`) keeps every table row on one line, and for *this*
+#   table the cells are space-separated, so a row arrives as
+#   `中科曙光 649,900,000 649,900,000 0 0 首发限售 2025/8/12`.
+# - **coordinates** (`visitor_text` + clustering) were also prototyped. They do preserve cell
+#   boundaries, but one visual row is emitted as *two* clusters ~0.6pt apart (the numeric
+#   cells sit at y=454.6, the holder-name and reason cells at y=454.0), so any single global
+#   row-band tolerance wide enough to merge them also merges the neighbouring row 15.7pt away.
+#   Making that robust needs per-column y-grouping, which is more machinery than this table
+#   repays — and the layout path below is validated by a checksum anyway.
+#
+# So layout mode it is, with three honesty rules that keep it safe:
+#
+# 1. **The table is located by its own header.** No `限售股份变动情况` / `年初限售股数`, no parse.
+# 2. **Cells are recovered right-to-left.** The trailing columns (限售原因, 解除限售日期) are
+#    unambiguous, and taking the numeric columns from the right avoids the one place layout
+#    mode runs two cells together — `1,437,780,9101,437,780,910` in the 合计 row — which this
+#    module never has to read, because the published total is used as a CHECK.
+# 3. **The issuer's own 合计 row validates the parse.** If the holder rows do not sum to it,
+#    the adapter refuses to emit rather than publishing a plausible-looking wrong table.
+
+LOCKUP_UNIT = "shares"
+# Thousands separators must be properly grouped. A looser `[\d,]+` accepts a GLUED pair as
+# one valid number — `1,437,780,9101,437,780,910` parsed as 1.4e19 — which silently defeats
+# both the checksum and the splitter that repairs it.
+CELL_NUMBER_RE = re.compile(r"^-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$")
+CELL_DATE_RE = re.compile(r"^\d{4}\s*[/\-年]\s*\d{1,2}\s*[/\-月]\s*\d{1,2}\s*日?$")
+# 限售原因 vocabulary: 首发限售 / 股权激励 / 定向增发 / 战略配售 / 其他 …
+LOCKUP_REASON_RE = re.compile(r"^[\u4e00-\u9fff]{2,12}$")
+LOCKUP_REASON_TOKENS = ("首发", "限售", "激励", "增发", "配售", "锁定", "转让", "其他")
+
+
+def _cell_number(value: str) -> Optional[float]:
+    text = (value or "").strip()
+    if not CELL_NUMBER_RE.match(text):
+        return None
+    try:
+        return float(text.replace(",", "").replace("，", ""))
+    except ValueError:
+        return None
+
+
+def _cell_date(value: str) -> str:
+    text = re.sub(r"\s+", "", value or "")
+    match = re.match(r"^(\d{4})[/\-年](\d{1,2})[/\-月](\d{1,2})日?$", text)
+    if not match:
+        return ""
+    year, month, day = match.groups()
+    return f"{year}-{int(month):02d}-{int(day):02d}"
+
+
+def _lockup_reason(value: str) -> str:
+    text = (value or "").strip()
+    if not text or not LOCKUP_REASON_RE.match(text):
+        return ""
+    return text if any(token in text for token in LOCKUP_REASON_TOKENS) else ""
+
+
+def _split_glued_numbers(blob: str, known: list[float]) -> list[float]:
+    """Split a token that layout mode glued together out of two published numbers.
+
+    Only the 合计 row does this (`1,437,780,9101,437,780,910`) because it is the one row whose
+    cells sit flush. Ambiguity is resolved structurally, in order of strength:
+
+    1. a split whose two halves are **equal** — the observed case, and self-evidencing;
+    2. a split whose two halves are numbers the holder rows already published;
+    3. a split whose *right* half is known, leaving the left as the remainder (the totals row
+       publishes a single-column sum, so that sum will not appear in ``known``);
+    4. a single surviving candidate.
+
+    Anything still ambiguous returns nothing and is reported as a gap, because a wrong split
+    here would silently corrupt the checksum the whole parser rests on.
+    """
+    def num(text: str) -> Optional[float]:
+        # ``_cell_number`` validates the comma form FIRST (``CELL_NUMBER_RE``); stripping the
+        # commas before the digit test instead would accept malformed halves like ``'1,'``
+        # and ``',437'``, which is what turned this token into 14 bogus candidates.
+        return _cell_number(text)
+
+    def is_known(value: float) -> bool:
+        return any(abs(value - k) < 0.5 for k in known)
+
+    candidates: list[list[float]] = []
+    for index in range(1, len(blob)):
+        left, right = num(blob[:index]), num(blob[index:])
+        if left is None or right is None:
+            continue
+        candidates.append([left, right])
+    if not candidates:
+        return []
+    equal = [pair for pair in candidates if abs(pair[0] - pair[1]) < 0.5]
+    if len(equal) == 1:
+        return equal[0]
+    both_known = [pair for pair in candidates if all(is_known(v) for v in pair)]
+    if len(both_known) == 1:
+        return both_known[0]
+    right_known = [pair for pair in candidates if is_known(pair[1])]
+    if len(right_known) == 1:
+        return right_known[0]
+    return candidates[0] if len(candidates) == 1 else []
+
+
+def parse_lockup_change_rows(rows: list[list[str]]) -> dict:
+    """Parse already-split rows of a 限售股份变动情况 table.
+
+    An accepted row carries four numbers — 年初限售股数, 本年解除限售股数, 本年增加限售股数,
+    年末限售股数 — optionally followed by a 限售原因 and a 解除限售日期. Anything else is
+    reported as a gap rather than guessed at.
+
+    The published 合计 row is a **check, never a claim**: the working invariant is
+    ``年末 = 年初 - 本年解除 + 本年增加`` per holder, and the holders' columns must sum to the
+    published total. A mismatch is surfaced, never averaged away.
+    """
+    holders: list[dict] = []
+    rollup_raw: Optional[list[str]] = None
+    gaps: list[str] = []
+
+    for cells in rows:
+        tokens = [c for c in ((c or "").strip() for c in cells) if c]
+        if len(tokens) < 5:
+            continue
+        name = tokens[0]
+        if _cell_number(name) is not None or _cell_date(name):
+            continue
+        if name in {"合计", "总计"}:
+            rollup_raw = tokens
+            continue
+        date = next((d for d in (_cell_date(t) for t in tokens) if d), "")
+        reason = next((t for t in tokens if _lockup_reason(t)), "")
+        # Column order is as published, left to right.
+        operands = [t for t in tokens[1:] if _cell_number(t) is not None and t != reason]
+        if len(operands) != 4:
+            gaps.append(f"{name}: expected 4 numeric columns, found {len(operands)} ({tokens})")
+            continue
+        opening, released, added, closing = (_cell_number(v) for v in operands)
+        holders.append({
+            "holder": name, "opening": opening, "released": released,
+            "added": added, "closing": closing, "reason": reason, "date": date,
+        })
+
+    # The 合计 row is the checksum, so its own glued token has to be repaired before use.
+    rollup: Optional[dict] = None
+    if rollup_raw is not None:
+        known = [h[k] for h in holders for k in ("opening", "released", "added", "closing")]
+        operands: list[float] = []
+        for token in rollup_raw[1:]:
+            value = _cell_number(token)
+            if value is not None:
+                operands.append(value)
+            elif re.fullmatch(r"[\d,]+", token):
+                # A glued pair of numbers, e.g. `1,437,780,9101,437,780,910`. This is the FIRST
+                # numeric cell after 合计, so it must not be gated on `operands` being non-empty
+                # - doing that silently skipped the repair and dropped the checksum. Separator
+                # cells (`/`, `-`, `不适用`) fail the digits-and-commas test.
+                operands.extend(_split_glued_numbers(token, known))
+        if len(operands) >= 4:
+            rollup = dict(zip(("opening", "released", "added", "closing"), operands))
+        else:
+            gaps.append(f"合计 row could not be split into four columns: {rollup_raw}")
+
+    checks: dict = {}
+    if rollup is not None:
+        for label, key in (("Opening", "opening"), ("Released", "released"),
+                           ("Added", "added"), ("Closing", "closing")):
+            checks[f"rollup{label}MatchesSum"] = (
+                abs(sum(h[key] for h in holders) - rollup[key]) < 0.5)
+    for holder in holders:
+        expected = holder["opening"] - holder["released"] + holder["added"]
+        if abs(expected - holder["closing"]) >= 0.5:
+            gaps.append(f"{holder['holder']}: 年初 {holder['opening']:,.0f} - "
+                        f"解除 {holder['released']:,.0f} + 增加 {holder['added']:,.0f} != "
+                        f"年末 {holder['closing']:,.0f}")
+    return {"holders": holders, "rollup": rollup, "checks": checks, "gaps": gaps}
+
+
+def lockup_table_lines(layout_text: str) -> list[list[str]]:
+    """Data rows of the 限售股份变动情况 table, taken from a layout-mode page body.
+
+    The header is the anchor; the search starts at the section title so a page carrying
+    several tables cannot hand back the wrong one, and stops at the next numbered section.
+    """
+    lines = layout_text.splitlines()
+    start = None
+    for index, line in enumerate(lines):
+        if "限售股份变动情况" in line:
+            start = index
+        if start is not None and "年初限售股数" in line:
+            start = index
+            break
+    if start is None:
+        return []
+    rows: list[list[str]] = []
+    for line in lines[start + 1:]:
+        tokens = line.split()
+        if not tokens:
+            continue
+        if any(token.startswith(("二、", "三、", "四、", "五、", "六、", "七、"))
+               for token in tokens):
+            break
+        first = tokens[0]
+        if _cell_number(first) is not None or _cell_date(first):
+            continue
+        if not (5 <= len(tokens) <= 9):
+            continue
+        rows.append(tokens)
+    return rows
+
+
+def fetch_lockup_change(
+    symbol: str,
+    *,
+    as_of: Optional[str] = None,
+    market_scope: str = "CN",
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    max_pages: int = PDF_SCAN_MAX_PAGES,
+    max_items: Optional[int] = None,
+) -> FetchResult:
+    """限售股份变动情况 for one name, read from the newest periodic report body (L1).
+
+    This is the per-holder restricted-share movement the A-share market-structure gate asks
+    for: who still holds locked shares, how many were released, how many were added and what
+    remains, with the 限售原因 and 解除限售日期 that travel with it. The standalone
+    限售股上市流通公告 covers one unlock event at a time; this reads the periodic report's
+    table, which is the one the L1 review named.
+
+    Refuses loudly rather than emitting a dubious table: a body with no such table, or one
+    whose rows do not sum to the issuer's own 合计, raises a routable gap instead.
+    """
+    as_of = as_of or _dt.date.today().isoformat()
+    thscode = resolve_thscode(symbol)
+    sec_code, _board = thscode.split(".")
+    until = until or as_of
+    since = since or (_dt.date.fromisoformat(until) - _dt.timedelta(days=730)).isoformat()
+
+    # ``半年度报告`` CONTAINS the substring ``年度报告``, so a naive "年度报告 in title" test
+    # classifies every interim report as an annual one — the same trap report_period_end
+    # documents. The interim test therefore excludes the annual marker.
+    reports = [item for item in find_announcements(
+        symbol, since=since, until=until, max_items=max_items)
+        if "摘要" not in item["announcementTitle"]
+        # The portal also publishes translated bodies (e.g. `2025年年度报告（英文版）`). Their
+        # tables are laid out differently and translate the column labels, so the Chinese
+        # original is the one this parser reads.
+        and "英文" not in item["announcementTitle"]
+        and "english" not in item["announcementTitle"].lower()
+        and ("半年度报告" in item["announcementTitle"]
+             or "年度报告" in item["announcementTitle"])]
+    if not reports:
+        raise net.FetchError(
+            f"cninfo_source_gap: no periodic report body for {thscode} between {since} and {until}")
+
+    # Prefer the annual report: an issuer can mark the table 适用 in one periodic report and
+    # 不适用 in the next (measured on 海光信息, whose FY2025 annual report carries the table
+    # while its H1 2026 report does not), so "newest body" alone reports a false gap.
+    annual = [item for item in reports if "半年度报告" not in item["announcementTitle"]]
+    report = sorted(annual or reports, key=lambda i: i.get("date_bj") or "")[-1]
+
+    pypdf = _require_pypdf()
+    raw = net.get(report["pdf_url"], headers=HEADERS, timeout=_timeout())
+    if len(raw) > PDF_MAX_BYTES:
+        raise net.FetchError(
+            f"cninfo_pdf_too_large: {len(raw)} bytes exceeds the {PDF_MAX_BYTES}-byte cap "
+            f"for {report['pdf_url']}")
+    try:
+        reader = pypdf.PdfReader(_io.BytesIO(raw))
+    except Exception as exc:                             # noqa: BLE001 - vendor parser
+        raise net.FetchError(f"cninfo_pdf_unparsable: {report['pdf_url']}: {exc}") from exc
+
+    period = report_period_end(report["announcementTitle"]) or (report.get("date_bj") or as_of)
+    posture = POSTURES["cninfo_lockup_change"]
+    records: list[CanonicalRecord] = []
+    seen_holders: set[str] = set()
+
+    for index in range(min(len(reader.pages), max_pages)):
+        try:
+            layout = reader.pages[index].extract_text(extraction_mode="layout") or ""
+        except Exception:                                # noqa: BLE001 - per-page recovery
+            continue
+        if "限售股份变动情况" not in layout or "年初限售股数" not in layout:
+            continue
+        parsed = parse_lockup_change_rows(lockup_table_lines(layout))
+        if not parsed["holders"]:
+            continue
+        # The checksum is MANDATORY, not best-effort. An earlier draft emitted whenever
+        # `checks` was empty, which meant a table whose 合计 row failed to parse was
+        # published with no validation at all - and it was wrong (the columns were read
+        # backwards) while looking perfectly plausible. No verified rollup, no emission.
+        if not parsed["checks"]:
+            raise net.FetchError(
+                f"cninfo_lockup_check_missing: {thscode} {report['announcementTitle']} page "
+                f"{index + 1}: the 合计 row could not be parsed, so the holder rows cannot be "
+                f"validated ({parsed['gaps']}); refusing to emit an unverified table")
+        failed = {k: v for k, v in parsed["checks"].items() if v is False}
+        if failed:
+            raise net.FetchError(
+                f"cninfo_lockup_check_failed: {thscode} {report['announcementTitle']} page "
+                f"{index + 1}: holder rows do not sum to the issuer's published 合计 row "
+                f"({failed}); refusing to emit a table that does not reconcile")
+        for holder in parsed["holders"]:
+            if holder["holder"] in seen_holders:
+                continue
+            seen_holders.add(holder["holder"])
+            common = {
+                "holderName": holder["holder"],
+                "lockupReason": holder["reason"] or "未标注限售原因",
+                "unlockDate": holder["date"] or None,
+                "reportTitle": report["announcementTitle"],
+                "reportUrl": report["pdf_url"],
+                "reportDate": report.get("date_bj"),
+                "pdfPage": index + 1,
+                "rollupCheck": parsed["checks"],
+                "rowGaps": parsed["gaps"],
+                "extraction": ("cells taken from the layout-mode text layer, right to left, "
+                               "and validated against the issuer's own 合计 row"),
+                "upgradePath": ("the same unlock is filed per event in a standalone "
+                                "限售股上市流通公告; that filing is the cross-check"),
+            }
+            for metric, key, label in (
+                ("lockup_opening_balance", "opening", "年初限售股数"),
+                ("lockup_released", "released", "本年解除限售股数"),
+                ("lockup_added", "added", "本年增加限售股数"),
+                ("lockup_closing_balance", "closing", "年末限售股数"),
+            ):
+                value = holder[key]
+                when = f"（解除限售日期 {holder['date']}）" if holder["date"] else ""
+                records.append(CanonicalRecord(
+                    family="ownership_short_interest", research_object=thscode,
+                    market_scope=market_scope, metric=metric, value=float(value),
+                    unit=LOCKUP_UNIT, period=period, period_type="fiscal_period",
+                    as_of_date=as_of, source_date=report.get("date_bj") or as_of,
+                    posture=posture, url_or_path=report["pdf_url"],
+                    claim_text=f"{thscode} {period} {holder['holder']} {label} {value:,.0f} 股{when}",
+                    provenance=dict(common),
+                ))
+
+    if not records:
+        raise net.FetchError(
+            f"cninfo_lockup_not_applicable: {thscode} {report['announcementTitle']} — no page "
+            f"carried a 限售股份变动情况 table with a 年初限售股数 header; the issuer reports no "
+            f"restricted-share movement for {period}")
+    return FetchResult(records)
 
 
 # --------------------------------------------------------------------------- #
@@ -758,9 +1126,72 @@ IR_NOT_EXTRACTED = ("free-text colour (tone, hedging, evasion) is not extracted;
                     "filed wording is quoted")
 
 
+def search_announcements_fulltext(
+    search_key: str,
+    *,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    title_contains: Optional[str] = None,
+    max_pages: int = 3,
+) -> list[dict]:
+    """Documents matching ``search_key`` from the portal's full-text search index.
+
+    **Why this exists next to ``find_announcements``.** The announcement feed
+    (``hisAnnouncement/query``) and this index are separate: 投资者关系活动记录表 is filed for
+    Shenzhen names and for the HK-line "海外监管公告" copies, but is simply absent from the feed,
+    so a feed-only lookup reports a false gap. Measured 2026-10-03: the feed returns 17 rows for
+    亿道信息 in 2026-09 with none of them an IR record, while this index returns ~1020 IR records
+    market-wide going back to 2018-03, including Shenzhen codes (301277, 002486, 002921, …).
+
+    Contract measured live:
+
+    - ``POST`` form-encoded; the keyword field is ``searchkey`` and it **is** honoured — a
+      nonsense key returns ``total`` 0 while a real one returns the corpus size.
+    - ``pageSize`` is **silently capped at 100**; a larger request is accepted and ignored, and
+      the reported ``totalpages`` shrinks to match the cap, so the cap is applied here.
+    - ``sdate``/``edate`` (``YYYY-MM-DD``) filter the result set, but ``total`` then counts only
+      the window, so an empty keyword with a window is a usable date sweep of the whole corpus.
+    - Rows carry the same identity fields as the feed (``secCode``, ``announcementTitle``,
+      ``announcementTime`` as a Beijing epoch, ``adjunctUrl``), so the same PDF route and the
+      same parser apply.
+    - The index also returns **5-digit HK codes** for A+H issuers, which are not A-share symbols
+      and must be filtered by the caller rather than silently accepted.
+    """
+    since = since or ""
+    until = until or ""
+    rows: list[dict] = []
+    for page in range(1, max(1, max_pages) + 1):
+        payload = net.post_form_json(FULLTEXT_SEARCH_URL, {
+            "searchkey": search_key, "sdate": since, "edate": until,
+            "isfulltext": "false", "sortName": "nothing", "sortType": "desc",
+            "pageNum": str(page), "pageSize": str(FULLTEXT_PAGE_SIZE),
+        }, headers=HEADERS, retries=2, backoff=1.5)
+        batch = payload.get("announcements") or []
+        for item in batch:
+            item = dict(item)
+            item["announcementTitle"] = clean_title(item.get("announcementTitle"))
+            item["date_bj"] = bj_date(item.get("announcementTime"))
+            item["pdf_url"] = pdf_url(item.get("adjunctUrl"))
+            if title_contains and title_contains not in item["announcementTitle"]:
+                continue
+            rows.append(item)
+        if len(batch) < FULLTEXT_PAGE_SIZE:
+            break
+    return rows
+
+
 def _ir_field(text: str, pattern: str) -> str:
     match = re.search(pattern, text)
     return re.sub(r"\s+", " ", match.group(1)).strip(" ：:") if match else ""
+
+
+def _ir_iso_date(value: str) -> str:
+    """``2026 年 3 月 31 日`` -> ``2026-03-31``; the form prints dates in Chinese."""
+    match = re.search(r"(20\d{2})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", value or "")
+    if not match:
+        return ""
+    year, month, day = match.groups()
+    return f"{year}-{int(month):02d}-{int(day):02d}"
 
 
 def parse_ir_activity(text: str) -> dict:
@@ -804,9 +1235,16 @@ def fetch_ir_activity(
     One record per answered question, because the claim is what the company *said*, while the
     activity header (category, participants, date, venue, receptionists) travels in provenance
     on every record. Texts are extracts, never full copies, and nothing is inferred from tone.
+
+    Covers both markets through two indexes, feed first and full-text search as the fallback:
+    Shanghai filers publish the record as an ordinary announcement, while Shenzhen filers and
+    the HK-line "海外监管公告" copies are absent from the announcement feed and only appear in the
+    search index. An earlier revision of this adapter concluded Shenzhen was unreachable; that
+    was an artefact of querying the feed alone.
     """
     as_of = as_of or _dt.date.today().isoformat()
     thscode = resolve_thscode(symbol)
+    sec_code, _board = thscode.split(".")
     cap = _max_items(max_items)
     until = until or as_of
     since = since or (_dt.date.fromisoformat(until) - _dt.timedelta(days=DEFAULT_DAYS)).isoformat()
@@ -815,11 +1253,21 @@ def fetch_ir_activity(
     rows = [row for row in find_announcements(symbol, until=until, max_items=max(cap * 10, 100))
             if IR_ACTIVITY_TITLE in row["announcementTitle"]
             and row["date_bj"] >= since]
+    source_index = "announcement_feed"
+    if not rows:
+        # Fallback index. Filter to the requested A-share code: the same search also returns
+        # the issuer's 5-digit HK-line copies, and those are a different security. Three pages
+        # of 100 is a bounded sweep - one name's IR history is a handful of records, not a
+        # market-wide backfill.
+        rows = [row for row in search_announcements_fulltext(
+            sec_code, since=since, until=until, title_contains=IR_ACTIVITY_TITLE, max_pages=3)
+            if str(row.get("secCode") or "").strip() == sec_code
+            and row["date_bj"] >= since]
+        source_index = "fulltext_search"
     if not rows:
         raise net.FetchError(
             f"cninfo_source_gap: no 投资者关系活动记录表 for {thscode} between {since} and "
-            f"{until}; Shenzhen names file these on the 互动易 platform instead of as "
-            "announcements, so this channel covers Shanghai filers")
+            f"{until}; checked both the announcement feed and the full-text search index")
 
     posture = POSTURES["cninfo_ir_activity"]
     errors: list[str] = []
@@ -835,15 +1283,18 @@ def fetch_ir_activity(
             errors.append(f"{row['announcementTitle']}: no numbered Q&A in the text layer")
             continue
         records = []
+        # `period` stays ISO-8601 like every other adapter emits; the verbatim Chinese form
+        # date is kept alongside it in provenance as `activityDate`.
+        activity_iso = _ir_iso_date(parsed.get("date") or "") or row["date_bj"]
         for index, (question, answer) in enumerate(pairs[:cap], start=1):
             records.append(CanonicalRecord(
                 family="transcript_claim", research_object=thscode,
                 market_scope=market_scope, metric="ir_qa_answer",
                 value=f"{row.get('announcementId') or row['date_bj']}-{index}",
-                unit="qa_id", period=parsed.get("date") or row["date_bj"],
+                unit="qa_id", period=activity_iso,
                 period_type="point_in_time", as_of_date=as_of, source_date=row["date_bj"],
                 posture=posture, url_or_path=row["pdf_url"],
-                claim_text=(f"{thscode} {parsed.get('date') or row['date_bj']} "
+                claim_text=(f"{thscode} {activity_iso} "
                             f"{parsed.get('category') or '投资者关系活动'} 问答："
                             f"{answer[:IR_ANSWER_LIMIT]}"),
                 provenance={
@@ -858,6 +1309,7 @@ def fetch_ir_activity(
                     "answerChars": len(answer), "qaIndex": index, "qaCount": len(pairs),
                     "pagesRead": got["pages_read"], "pageCount": got["page_count"],
                     "extractionMethod": "pdf_text_layer_form/v1",
+                    "sourceIndex": source_index,
                     "notExtracted": IR_NOT_EXTRACTED,
                     "bodyRetrieval": ("filed body parsed locally; the question and a capped "
                                       "answer extract are retained"),

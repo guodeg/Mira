@@ -1,0 +1,59 @@
+{
+  "manifest_version": "mira_research_package_v1",
+  "case_id": "688008-2026-10-02",
+  "research_object": "澜起科技 Montage Technology (688008.SH / 06809.HK)",
+  "market_scope": "CN_A_SHARE_STAR",
+  "time_boundary": "Financials 2016..2026H1; market data 2019-10-08..2026-09-30; research cutoff 2026-10-02",
+  "research_cutoff_date": "2026-10-02",
+  "package_type": "research_package",
+  "readiness_level": "watch_only",
+  "readiness_basis": "Full primary-source chain (CNINFO filings + THS financials) with all key figures recomputed. Capped by (a) an irreducible legal uncertainty the company itself says it cannot predict, and (b) no independent third-party industry source available in this session.",
+  "blocking_gaps": [
+    "P17 - Korean antitrust investigation (Seoul Central District Prosecutors' Office raid 2026-07-15); timing and outcome not predictable per company",
+    "G06 - quarterly bridge from 营业利润 to 利润总额 not fully reconstructed",
+    "G05 - 2026Q2 single-quarter gross margin is derived by differencing cumulative YTD, not company-stated",
+    "G07 - no independent third-party industry source; all industry claims rest on company statements"
+  ],
+  "primary_loop": "loops/research-loop.md",
+  "lead_skill": "skills/equity-research-core/SKILL.md",
+  "support_skills": [
+    "skills/earnings-report-analysis/SKILL.md",
+    "skills/data-analysis-quality-gate/SKILL.md"
+  ],
+  "hero_artifacts": [
+    "investment-memo.md"
+  ],
+  "support_artifacts": [
+    "evidence-log.csv",
+    "case-notes.md",
+    "cninfo_titles.txt"
+  ],  "handoffs": [],
+  "source_scope": "Primary: CNINFO 巨潮资讯网 official disclosure API (152 announcements indexed 2025-09-03..2026-10-01; 12 PDFs text-extracted, including the 2025 annual report and 2026 interim report). Vendor: Tonghuashun via the hithink-finance CLI for standardized financials, market snapshot/history and valuation - aggregator grade, cross-checked against the filings. Third party: THS F10 consensus (17 institutions) and individual sell-side notes, treated as estimate/attributed only. No independent third-party industry source (TrendForce / IDC / Counterpoint) was obtainable. Raw vendor payloads, extracted filing text and a vendored PDF library stay untracked under this case directory (raw/, pdftext/, pdftext_via_toolkit/, _pylibs/).",
+  "evidence_log_status": "canonical_v1_2",
+  "quant_gate_status": "triggered_and_satisfied",
+  "quant_dependency": "high",
+  "calculation_gate": "triggered",
+  "calculation_gate_basis": "Valuation multiples, TTM aggregation, single-quarter derivation, reverse DCF, and relative performance all drive conclusions.",
+  "calculation_status": "reproduced",
+  "calculation_artifacts": [
+    "final_metrics.py",
+    "metrics.py",
+    "tech.py",
+    "relative.py",
+    "parse.py",
+    "trace.py"
+  ],
+  "stale_after": "2026-10-31",
+  "must_refresh_if": [
+    "Any development in the Korean antitrust investigation (indictment / non-prosecution / fine / behavioural remedy)",
+    "2026Q3 interconnect-segment gross margin (not consolidated)",
+    "2026Q3 accounts receivable, inventory, operating cash flow",
+    "2026Q3/Q4 扣非 yoy growth",
+    "Buyback window expiry 2026-10-23 and actual execution vs the RMB 600m cap",
+    "WLT Partners reduction window 2026-11-02..2027-02-01 execution",
+    "Consensus 2026E moving below RMB 3.0bn",
+    "Platform-level MRDIMM / MRCD-MDB volume adoption evidence",
+    "Price below 177 (MA250) or above 233 (September high)"
+  ],
+  "notes": "Migrated to the canonical research-package schema on 2026-10-03, preserving the original case date and research cutoff. The evidence log was re-expressed from a case-local claim list into canonical v1.2 columns; no claim, figure or judgment was altered, and the case's own environment limitations and residual gaps are carried in blocking_gaps and must_refresh_if. This is research output, not investment advice."
+}

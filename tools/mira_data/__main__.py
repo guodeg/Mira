@@ -13,10 +13,11 @@ import argparse
 import os
 import re
 import sys
+from functools import partial
 
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
-                       eastmoney_consensus, eastmoney_macro, em_insider, em_lockup,
+                       eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
                        exchange_disclosure, exchange_margin, exchange_northbound, futu_opend,
                        hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
                        investor_qa, nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
@@ -29,7 +30,8 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "macro_nbs", "macro_region", "index_benchmark", "index_members",
                      "index_valuation", "exchange_announcements", "northbound_turnover",
                      "shareholder_count", "ir_activity", "valuation_snapshot",
-                     "executive_holdings", "lockup_schedule")
+                     "executive_holdings", "lockup_schedule", "lockup_change",
+                     "shareholders_top10", "shareholders_free_float")
 # Families that take the announcement-window flags (--since/--until/--max-items).
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity",
                     "executive_holdings", "lockup_schedule")
@@ -139,6 +141,15 @@ FETCHERS = {
                            em_insider.fetch_executive_holdings, em_insider.ENDPOINT),
     "lockup_schedule": ("限售解禁 schedule: date, share type, batch holders (L5)",
                         em_lockup.fetch_lockup_schedule, em_lockup.ENDPOINT),
+    "lockup_change": ("限售股份变动情况 from the filed periodic report body: per-holder "
+                      "年初/解除/增加/年末 restricted shares (L1)",
+                      cninfo_disclosure.fetch_lockup_change, cninfo_disclosure.ENDPOINT),
+    "shareholders_top10": ("前十名股东 (top-10 holders by total holding, L5 relay)",
+                           partial(em_holders.fetch_shareholders, table="top10"),
+                           em_holders.TABLES["top10"][3]),
+    "shareholders_free_float": ("前十名流通股东 (top-10 tradable-share holders, L5 relay)",
+                                partial(em_holders.fetch_shareholders, table="free_float"),
+                                em_holders.TABLES["free_float"][3]),
 }
 
 
@@ -760,6 +771,10 @@ def _do_fetch(args) -> int:
         kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
     elif family == "lockup_schedule":
         kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
+    elif family == "lockup_change":
+        kwargs.update(since=args.since, until=args.until, max_items=args.max_items)
+    elif family in {"shareholders_top10", "shareholders_free_float"}:
+        kwargs["max_holders"] = args.max_items
     elif family == "investor_qa":
         kwargs.update(days=args.days, max_items=args.max_items)
     elif family == "option_surface":
@@ -882,6 +897,19 @@ def _do_fetch(args) -> int:
         must_refresh_if = (
             "next disclosure from the issuer; the window is explicit, so an older filing needs "
             "--since rather than a wider default"
+        )
+    elif family == "lockup_change":
+        must_refresh_if = (
+            "the next periodic report body; an issuer can mark the table 适用 in one report and "
+            "不适用 in the next, so a holder list that a filing publishes can be absent from the "
+            "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
+        )
+    elif family in {"shareholders_top10", "shareholders_free_float"}:
+        must_refresh_if = (
+            "the next periodic-report window (annual/Q1 by Apr 30, interim by Aug 31, Q3 by "
+            "Oct 31), or a new shareholding disclosure; the channel reads the newest period "
+            "only, so the issuer's own top-ten table is the L1 cross-check before a durable "
+            "ownership conclusion"
         )
     else:
         must_refresh_if = ""

@@ -100,7 +100,12 @@ def test_records_are_company_claims_with_the_header_in_provenance() -> None:
     assert record.family == "transcript_claim" and record.metric == "ir_qa_answer"
     assert record.research_object == "603088.SH"
     assert record.value == "1225587176-1" and record.unit == "qa_id"
-    assert record.period == "2026 年 9 月 29 日"
+    # `period` is ISO-8601 like every other adapter emits; the verbatim Chinese form date the
+    # filing prints lives in provenance as `activityDate` (it used to be the period, which made
+    # this adapter the only one emitting a non-ISO period).
+    assert record.period == "2026-09-29", record.period
+    assert record.provenance["activityDate"] == "2026 年 9 月 29 日"
+    assert record.provenance["sourceIndex"] == "announcement_feed"
     assert record.posture.source_id == "cninfo_announcement_api"
     assert record.posture.authority_level == "L1"
     assert record.posture.claim_type == "company_claim"
@@ -125,19 +130,31 @@ def test_caps_and_gaps() -> None:
     else:
         raise AssertionError("a filing without Q&A must be a labelled gap")
 
-    try:
-        _fetch(filings=[])
-    except net.FetchError as exc:
-        assert "cninfo_source_gap" in str(exc) and "互动易" in str(exc)
-    else:
-        raise AssertionError("the Shenzhen disclosure route must be named in the gap")
+    # Both indexes empty. The gap must name BOTH, because "not in the feed" is not evidence of
+    # absence (that misreading is what once made this channel claim Shanghai-only coverage), and
+    # the search must be mocked so an offline suite never reaches the network.
+    with mock.patch.object(cn, "find_announcements", return_value=[]), \
+            mock.patch.object(cn, "search_announcements_fulltext", return_value=[]):
+        try:
+            cn.fetch_ir_activity("603088", since="2026-07-01", until="2026-10-03")
+        except net.FetchError as exc:
+            message = str(exc)
+            assert "cninfo_source_gap" in message
+            assert "announcement feed" in message and "full-text search" in message
+        else:
+            raise AssertionError("two empty indexes must be a labelled gap naming both")
 
-    try:
-        _fetch(filings=[dict(FILING, announcementTitle="某某公司关于分红的公告")])
-    except net.FetchError as exc:
-        assert "cninfo_source_gap" in str(exc)
-    else:
-        raise AssertionError("non-IR filings must not be parsed as activity records")
+    # A feed page full of non-IR filings must not be parsed as activity records. The search
+    # fallback is mocked empty so the assertion tests the filter, not the live index.
+    with mock.patch.object(cn, "find_announcements",
+                           return_value=[dict(FILING, announcementTitle="某某公司关于分红的公告")]), \
+            mock.patch.object(cn, "search_announcements_fulltext", return_value=[]):
+        try:
+            cn.fetch_ir_activity("603088", since="2026-07-01", until="2026-10-03")
+        except net.FetchError as exc:
+            assert "cninfo_source_gap" in str(exc)
+        else:
+            raise AssertionError("non-IR filings must not be parsed as activity records")
     print("ok caps hold and every empty case names its reason")
 
 

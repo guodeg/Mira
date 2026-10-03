@@ -245,6 +245,17 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="medium",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Shareholder-structure tables relayed by the aggregator: the numbers are the issuer's own
+    # disclosed 前十名股东 / 前十名流通股东 tables, but the publisher is the relay, so the
+    # speaker stays an aggregator and the issuer's filing is named as the upgrade route.
+    "eastmoney_shareholders_api": dict(
+        provider="Eastmoney datacenter (前十名股东 / 前十名流通股东 relay)",
+        speaker="aggregator",
+        license_scope="vendor_terms_unverified", storage_scope="private",
+        redistribution_allowed="unknown", readiness_impact="supports_cross_check_only",
+        freshness_status="acceptable_for_period", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
 }
 
 _DEFAULT_POLICY = dict(

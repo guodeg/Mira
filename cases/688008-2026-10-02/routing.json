@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "interaction_mode": "routed_research",
+  "primary_intent": "First-pass single-equity research on 澜起科技 / Montage Technology (688008.SH, plus its 06809.HK H-share line), focused on whether reported profit growth is real and whether the price already embeds it",
+  "secondary_intents": [
+    "Separate core from non-core earnings: TTM reported net margin 49.9% against 扣非 net margin 36.6% is the whole question",
+    "Establish an expectation baseline from the THS F10 consensus (17 institutions) and test whether the current multiple is justified by it",
+    "Assess the Korean antitrust investigation as a position-level risk the company itself declines to predict"
+  ],
+  "execution_order": "Route (first_pass_research, deep_dive) -> acquire the CNINFO primary disclosure chain -> recompute the reported figures -> derive TTM / single-quarter / valuation multiples -> cross-check derived against vendor-served values -> expectation anchor -> earnings-quality separation -> actionability gate",
+  "task_mode": "first_pass_research",
+  "research_object": "single_equity",
+  "market_scope": "A-share STAR board (CN) with an H-share line",
+  "time_boundary": "Financials 2016..2026H1; market data 2019-10-08..2026-09-30; research cutoff 2026-10-02; thesis horizon medium_term (1-3y)",
+  "depth_mode": "deep_dive",
+  "information_value": "high",
+  "knowability_status": "partially_knowable",
+  "quant_dependency": "high",
+  "calculation_gate": "required",
+  "scope_confirmation_required": "no",
+  "live_data_gate": "not_applicable",
+  "primary_skill_or_loop": "loops/research-loop.md",
+  "routing_basis": "A single-equity first pass whose central question is a numeric one (how much of reported growth is core), so it routes through equity-research-core with the valuation-expectation and earnings-quality overlays and a mandatory calculation gate.",
+  "routing_mismatch_risk": "Medium - the company is a genuine technology leader but posted a -37.8% revenue year in 2023, so a steady-state growth framework would systematically overstate it; the framework is therefore growth-with-strict-core/non-core-separation rather than plain growth.",
+  "expected_output_package": "investment-memo.md, evidence-log.csv, case-notes.md, research-package-manifest.json",
+  "readiness_level": "watch_only",
+  "private_state_action": "waive",
+  "decision_pressure": "medium",
+  "framing_risk": "none",
+  "disconfirmation_required": "yes",
+  "followup_prompt_mode": "standard",
+  "followup_questions": [
+    "Does the Korean antitrust investigation resolve before the 2026Q3 report, and does it touch the interconnect royalty stream rather than only the Korean office? (Rung A -> risk variable and readiness_level)",
+    "Is the 2026Q2 single-quarter gross margin, currently derived by differencing cumulative YTD, confirmed or revised by the company's own Q3 disclosure? (Rung B -> earnings-quality overlay, closes G05)",
+    "Does 2026Q3 扣非 yoy growth hold near the H1 rate of +21.17%, or does the reported-vs-core gap start to close? (Rung B -> the central yes/no on this case)",
+    "At what price and multiple does the reverse-expectations anchor flip from 'already embeds the ramp' to 'mispriced'? (Rung C -> valuation-expectation overlay and actionability)"
+  ],
+  "critical_interaction_mode": "progressive_followup",
+  "active_followup_status": "open"
+}
