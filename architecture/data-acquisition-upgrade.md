@@ -453,6 +453,29 @@ access to the口径原文, the 分部拆分 or the risk-factor wording. What it 
 lift structured fields out of those bodies (股东户数, 十大股东, 限售解禁), which the A-share
 market-structure gate asks for; that is the next piece of the same item.
 
+**Shenzhen IR-activity records: probed and blocked, with the reason chain.** The filed
+投资者关系活动记录表 channel above covers Shanghai filers. Shenzhen names do not file those as
+announcements at all, so five separate routes were probed for the Shenzhen side and all failed,
+which is worth recording so nobody repeats the search:
+
+1. ten sibling paths under `irm.cninfo.com.cn` (survey/companySurvey/querySurveyInfo/…) → all 404;
+2. the CNINFO announcement index for four large Shenzhen caps (000001, 300750, 002594, 002415) →
+   zero matching titles in a full quarter;
+3. the 互动易 platform-wide search (`POST /newircs/index/search`, which requires a multipart body
+   because a JSON body is silently ignored) across five keywords → every hit is `contentType`
+   11/1, i.e. **investor Q&A**, which this substrate already reads; there is no survey document
+   type in that index at all;
+4. the four `attachedId`/`esId` detail routes → all 404;
+5. the SPA bundles: the 451 KB app bundle exposes only four `/newircs/` routes and they are all
+   authentication (captcha, remote login, real-name auth, logout), while the chunk map is
+   generated at runtime (no `chunk*.js` literals, no webpack `.u` template, and
+   asset-manifest/manifest paths answer with the HTML shell rather than JSON).
+
+Conclusion: Shenzhen IR-activity transcripts are **not reachable from this substrate within this
+work**, and the honest coverage statement is that L1-③ covers Shanghai filers only. Reopening it
+would need a browser-grade renderer or a licensed route, which is a dependency decision rather
+than a probing exercise.
+
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
 route through aggregators and would land at L5 if built, and northbound **net flow is dead
