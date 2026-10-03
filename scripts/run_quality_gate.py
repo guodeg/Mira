@@ -23,6 +23,7 @@ PY_COMPILE_TARGETS = [
     "scripts/generate_case_manifests.py",
     "scripts/migrate_evidence_log_v1_to_v1_1.py",
     "scripts/test_mira_data_cninfo.py",
+    "scripts/test_mira_data_cninfo_pdf.py",
     "scripts/test_mira_data_consensus.py",
     "scripts/test_mira_data_csindex.py",
     "scripts/test_mira_data_exchange.py",
@@ -91,6 +92,7 @@ def build_checks(args: argparse.Namespace) -> list[tuple[str, list[str], set[int
         [
             ("py_compile", [sys.executable, "-m", "py_compile", *PY_COMPILE_TARGETS], {0}, True),
             ("mira_data_cninfo_tests", [sys.executable, "scripts/test_mira_data_cninfo.py"], {0}, True),
+            ("mira_data_cninfo_pdf_tests", [sys.executable, "scripts/test_mira_data_cninfo_pdf.py"], {0}, True),
             ("mira_data_consensus_tests", [sys.executable, "scripts/test_mira_data_consensus.py"], {0}, True),
             ("mira_data_csindex_tests", [sys.executable, "scripts/test_mira_data_csindex.py"], {0}, True),
             ("mira_data_exchange_tests", [sys.executable, "scripts/test_mira_data_exchange.py"], {0}, True),

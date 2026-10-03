@@ -438,6 +438,21 @@ support OI, IV rank or skew.
 15xxxx/16xxxx/18xxxx codes was not cosmetic: ETF codes reach the quote, announcement and
 option paths, and they were being rejected as invalid symbols.
 
+**Filing bodies, not just the index — implemented.** `mira_data cninfo text 600519 --title
+年度报告` reads the filed document itself: it finds the announcements whose title matches, then
+extracts the PDF text layer (verified live on a 110-page 半年度报告: 4,737 characters from the
+first six pages, 2,482 from the 摘要). PDF parsing needs the optional dependency `pypdf`
+(lazy import, `cninfo_dependency_gap` without it). The honesty rule is what the tests pin: an
+image-only scan reports `cninfo_pdf_text_gap` rather than an empty string, because an empty
+extraction reads exactly like "the filed document does not contain this section"; an oversized
+body reports `cninfo_pdf_too_large` with its size; unparsable bytes report
+`cninfo_pdf_unparsable`; a single failing page is marked inline (`[[page N extract failed]]`)
+instead of discarding the readable pages; and truncation is reported with the page counts. This
+closes the gap that mattered most in the L1 review — the substrate had index-level L1 and no
+access to the口径原文, the 分部拆分 or the risk-factor wording. What it does **not** yet do is
+lift structured fields out of those bodies (股东户数, 十大股东, 限售解禁), which the A-share
+market-structure gate asks for; that is the next piece of the same item.
+
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
 route through aggregators and would land at L5 if built, and northbound **net flow is dead

@@ -152,6 +152,16 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_EXCHANGE_WINDOW_DAYS=90
 # MIRA_EXCHANGE_MAX_ITEMS=50
 
+# --- Filing bodies (PDF text layer) ------------------------------------------
+# `mira_data cninfo text <code> --title <substring>` reads the filed document itself, not just
+# the index entry. PDF parsing needs the optional dependency `pypdf`:
+#     pip install pypdf
+# Without it the command reports `cninfo_dependency_gap`; the rest of the substrate is
+# unaffected. A body that parses to no text (an image-only scan) reports
+# `cninfo_pdf_text_gap` rather than looking like a document with that section missing.
+# MIRA_CNINFO_PDF_MAX_BYTES=41943040
+# MIRA_CNINFO_PDF_MAX_PAGES=40
+
 # --- Local live market-data preference ------------------------------------
 # Set this only on machines where the local broker/provider connector is
 # authorized and reachable. When set to futu_opend, `fetch market_price` and
