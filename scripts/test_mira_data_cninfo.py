@@ -294,6 +294,10 @@ def test_trading_status_and_enforcement_events() -> None:
         ("关于收到中国证监会立案告知书的公告", "investigation"),
         ("关于股票交易异常波动的公告", "risk_alert"),
         ("关于公司股票被实施退市风险警示的公告", "risk_alert"),
+        ("关于控股股东减持股份计划的公告", "shareholder_reduction"),
+        ("关于控股股东增持公司股份的公告", "shareholder_increase"),
+        ("股东询价转让结果报告书暨持股5%以上股东持有权益比例降至5%以下的权益变动提示性公告",
+         "equity_change"),
     )
     for title, expected in cases:
         token, basis = cn.classify(_announcement(announcementTitle=title,

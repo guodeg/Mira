@@ -153,6 +153,10 @@ TITLE_RULES: list[tuple[str, str]] = [
     # investigation or a pledge changes the risk picture.
     (r"停牌|复牌", "trading_halt"),
     (r"质押", "share_pledge"),
+    # 权益变动 is the one supply-change phrase the classifier was missing: 减持 and 增持 already
+    # have rules above, but a title that only says 权益变动 (e.g. a 5%-threshold crossing after a
+    # 询价转让) matched nothing and fell through to `other`.
+    (r"权益变动", "equity_change"),
     (r"立案调查|立案告知书|调查通知书", "investigation"),
     (r"风险提示|异常波动|退市风险警示", "risk_alert"),
     (r"股权激励|限制性股票|激励计划", "equity_incentive"),
