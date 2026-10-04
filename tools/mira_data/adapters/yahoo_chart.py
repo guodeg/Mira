@@ -51,6 +51,23 @@ def fetch_market_price(
     posture = POSTURES["yahoo_chart"]
     sym = symbol.upper()
 
+    # The exchange timezone is the field that makes a relative date resolvable, and the
+    # protocol requires it: "today" for 005930.KS is an Asia/Seoul date, not the user's or
+    # New York's. A price claim whose market timezone is unrecorded cannot be re-checked for
+    # freshness without re-deriving it from the ticker suffix, so it travels with the claim.
+    tz_name = meta.get("exchangeTimezoneName")
+    tz_offset = meta.get("gmtoffset")
+    market_note = {
+        "exchange": meta.get("fullExchangeName"),
+        "exchangeCode": meta.get("exchangeName"),
+        "exchangeTimezoneName": tz_name,
+        "gmtoffsetSeconds": tz_offset,
+        "sessionNote": ("source_date is the exchange's own session date; resolving a relative "
+                        "date for this instrument must use exchangeTimezoneName"),
+        "range": range_,
+        "interval": interval,
+    }
+
     def mp(metric, value, unit):
         if value is None:
             return None
@@ -59,7 +76,7 @@ def fetch_market_price(
             metric=metric, value=value, unit=unit, currency=currency if unit == currency else None,
             period=last_date, period_type="point_in_time", as_of_date=as_of,
             source_date=last_date, posture=posture, url_or_path=url,
-            provenance={"exchange": meta.get("fullExchangeName"), "range": range_, "interval": interval},
+            provenance=dict(market_note),
         )
 
     last_close = meta.get("regularMarketPrice")

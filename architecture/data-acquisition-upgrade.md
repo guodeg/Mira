@@ -776,6 +776,26 @@ the API's default ordering is alphabetical — so the minor market was being sur
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
 
+**Market coverage beyond US and CN: no adapter was needed, only discovery.** The L5 gap
+list said `market_price` was "US(Yahoo)+CN only". Probing showed the opposite for single
+names: HK, JP, TW, KR and four EU markets all read through the same family with correct
+currencies (0700.HK 421.2 HKD, 7203.T 2,856.5 JPY, 2330.TW 2,500.0 TWD, 005930.KS
+276,000 KRW, SAP.DE 183.92 EUR, ASML.AS 1,653.0 EUR). Verified tickers and their market
+timezones are recorded in [market-price-tickers.md](../data/market-price-tickers.md).
+
+**The one real defect was a discarded field.** Yahoo returns `exchangeTimezoneName` and
+the adapter read only `currency`, so a quote from Seoul, Tokyo or Taipei carried no market
+timezone. The protocol resolves a relative date in the *instrument's* market timezone, so
+without that field freshness cannot be re-checked without re-deriving the zone from the
+ticker suffix. Provenance now records the timezone name and its offset, and an absent
+value stays absent rather than defaulting to the user's zone. Two quirks worth knowing:
+`^N225` reports `Asia/Tokyo` with exchange code `OSA` (Osaka), so resolve from the
+timezone rather than the code; and `^VIX` is `America/Chicago`, not New York, because
+CBOE is a Chicago venue.
+
+This adapter previously had **no offline suite at all**, which is how that defect
+survived; `scripts/test_mira_data_yahoo_chart.py` now covers it.
+
 **Item 7 (association sales / installation / inventory): the production half was already covered,
 and the association half is HTML-only.** Two findings, and the first shrinks the gap substantially.
 
