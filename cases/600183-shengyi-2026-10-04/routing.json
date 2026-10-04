@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "interaction_mode": "routed_research",
+  "primary_intent": "Single-equity deep dive on 生益科技 (600183.SH), a copper-clad laminate (CCL) materials maker, framed as upstream-of-PCB: how do the reported profitability of the downstream board makers validate the volume ramp and price tolerance of the upstream high-speed CCL, and is the market's near-identical price-to-sales for materials and boards consistent with the verified return-on-equity spread",
+  "secondary_intents": [
+    "Explain why 600183 carries the highest PB (17.06) on the LOWEST ROE (21.25%) of the three",
+    "Test whether the FY2025 statements support the common narrative that upstream material holds stronger pricing power than midstream board",
+    "Resolve the divergence at 300476: strongest fundamentals (+79.77% revenue, 35.56% ROE) against a confirmed downtrend (-21.85% relative) near support",
+    "Characterise the sell-side dispersion gap: 600183 target range width 107.7% vs 300476 at 8.1%"
+  ],
+  "execution_order": "Route (single_equity, deep_dive) -> acquire L5 vendor statements/valuation/consensus/margin plus the L1 shareholder count -> cross-check gross margin by independent recomputation -> read the downstream board makers as demand validators -> build the evidence log -> draft the memo with the expectation map and refresh conditions",
+  "task_mode": "first_pass_research",
+  "research_object": "single_equity",
+  "market_scope": "A-share main board (CN); 600183.SH upstream CCL, 002463.SZ and 300476.SZ midstream PCB/HDI",
+  "time_boundary": "Financials FY2025 annual (report period 2025-4); margin data 2026-09-29..30; technical 2026-09-30; valuation and consensus 2026-10-04; research cutoff 2026-10-04",
+  "depth_mode": "deep_dive",
+  "information_value": "high",
+  "knowability_status": "partially_knowable",
+  "quant_dependency": "high",
+  "calculation_gate": "required",
+  "scope_confirmation_required": "no",
+  "live_data_gate": "not_applicable",
+  "primary_skill_or_loop": "loops/research-loop.md",
+  "routing_basis": "A single A-share object with a numeric central question (does the PS/ROE contradiction hold) and a defined downstream validator set. Not an earnings event, not macro, not ETF. The user explicitly set depth to deep_dive and the framework to supply-chain upstream/downstream validation rather than same-industry peer comparison.",
+  "routing_mismatch_risk": "High if treated as a same-industry peer comparison: CCL materials and PCB fabrication are different businesses (materials run low-margin/high-turnover/low-leverage, boards the reverse), so a straight comparison would report 600183 as uniformly inferior. That is the wrong measuring stick, and the case notes record the risk and the chosen framework explicitly.",
+  "expected_output_package": "investment-memo.md, evidence-log.csv, case-notes.md, routing.json, README.md",
+  "readiness_level": "working_view",
+  "readiness_basis": "All five requested modules are populated across the three names (valuation, profitability, consensus, microstructure, technical) with 21 evidence rows, and gross margin was independently recomputed to match the vendor exactly. Readiness is capped at working_view by eight recorded gaps, of which the missing product-grade gross margin split prevents adjudicating the report's central question, and by 17 of 21 rows being L5.",
+  "private_state_action": "waive",
+  "decision_pressure": "low",
+  "framing_risk": "none",
+  "disconfirmation_required": "yes",
+  "disconfirmation_note": "The strongest contrary reading is recorded rather than smoothed: if the downstream board makers' 35% gross margin reflects durable structural value-add, then 600183's 26.47% is not a temporary shortfall awaiting pass-through but the correct steady state, and the case for upstream re-rating weakens materially. H1/H2 in the open hypotheses exist to test exactly this.",
+  "followup_prompt_mode": "standard",
+  "followup_questions": [
+    "Does 600183's gross margin rise in FY2026 H1 (cyclical pass-through, H2) or stay near 26% (structural, H1)?",
+    "Does 300476 hold the 208.43 support, or does a break confirm the demand-deceleration reading over the valuation-digestion one?",
+    "Do 002463 and 300476 keep gross margin at or above 35% (downstream demand intact) or compress?",
+    "Does the PS dispersion across the three widen or close from 9.08/9.24/9.40?",
+    "Is there any further insider selling at 600183 after the 2026-09-21 disposal at 145.82?"
+  ],
+  "critical_interaction_mode": "progressive_followup",
+  "active_followup_status": "open",
+  "benchmark": {
+    "symbol": "000300.SS",
+    "selection": "auto",
+    "basis": "A-share instrument, so the A-share market baseline is used rather than SPY",
+    "source": "csindex_index_api (official CSI history, 727 sessions)",
+    "note": "SPY is explicitly not used. 600183's 3-month relative return is -17.17% against SPY but -5.02% against CSI300; mixing the two would distort relative strength while hiding the real baseline."
+  },
+  "peer_set": {
+    "core": [
+      "600183.SH"
+    ],
+    "downstream_validators": [
+      "002463.SZ",
+      "300476.SZ"
+    ],
+    "peer_relationship": "600183 sells CCL upstream; 002463 and 300476 fabricate boards downstream and are therefore demand and price validators rather than peers"
+  },
+  "known_gaps": [
+    "600183 product-grade gross margin split (M6/M7/M8 high-speed CCL vs conventional) - the most consequential gap; it blocks H1 vs H2",
+    "Capacity utilisation for all three names",
+    "Shareholder counts for 002463 and 300476 (cninfo_source_gap, no periodic report located)",
+    "Depth of two-market margin precision: SZSE values are rounded to ~1e6 and omit 融资偿还, so net margin flow is unavailable for 002463 and 300476",
+    "Historical valuation percentile series (no such channel in this substrate)",
+    "L1 announcement text for the 2026-09-21 insider disposal (currently L5 relay only)",
+    "positioning_risk and chase_risk_state (require options, short-interest or intraday data)"
+  ],
+  "actionability_boundary": "no_position_or_trade_advice",
+  "protocol_note": "Output is objective fact-based reasoning plus asymmetry analysis. No position sizing, buy/sell or timing recommendations: the user's holdings, weights, mandate and risk budget are unknown, so per OPERATING_CONTRACT.md no portfolio conclusion may be issued."
+}

@@ -1,0 +1,60 @@
+{
+  "manifest_version": "mira_research_package_v1",
+  "case_id": "600183-shengyi-2026-10-04",
+  "research_object": "生益科技 Shengyi Technology (600183.SH)",
+  "market_scope": "CN_A_SHARE_MAIN",
+  "time_boundary": "Financials FY2025 annual (report period 2025-4); margin 2026-09-29..30; technical 2026-09-30; valuation and consensus 2026-10-04; research cutoff 2026-10-04",
+  "research_cutoff_date": "2026-10-04",
+  "package_type": "research_package",
+  "readiness_level": "working_view",
+  "readiness_basis": "All five requested modules populated across the three names with 21 evidence rows, and gross margin independently recomputed to reproduce the vendor exactly (26.4727/35.4756/35.2235). Capped at working_view by eight recorded gaps - above all the missing product-grade gross margin split, which blocks adjudicating the report's central question - and by 17 of 21 rows being L5.",
+  "blocking_gaps": [
+    "G1 - 600183 product-grade gross margin split (M6/M7/M8 high-speed CCL vs conventional) is unavailable, so the report cannot decide whether the 26.47% margin is structural or a not-yet-passed-through cost increase; this is the single most consequential gap",
+    "G2 - no capacity utilisation data for any of the three names",
+    "G3 - shareholder counts unobtainable for 002463 and 300476 (cninfo returned no periodic report), so the only L1 ownership figure covers 600183 alone",
+    "G4 - SZSE margin data is rounded to ~1e6 and omits 融资偿还, so net margin flow cannot be computed for 002463 or 300476 and their balances are not comparable at SSE precision",
+    "G5 - no historical valuation percentile channel exists in this substrate, so 'PB 17 is historically high' cannot be evidenced, only stated as an absolute",
+    "G6 - the 2026-09-21 insider disposal is L5 relay only; the L1 announcement text was not verified",
+    "G7 - positioning_risk and chase_risk_state are source_gap for 600183 and 300476 (need options, short interest or intraday data)",
+    "G8 - 17 of 21 evidence rows are L5, so per protocol no durable conclusion may rest on this package alone"
+  ],
+  "primary_loop": "loops/research-loop.md",
+  "lead_skill": "skills/equity-research-core/SKILL.md",
+  "support_skills": [
+    "skills/data-analysis-quality-gate/SKILL.md"
+  ],
+  "hero_artifacts": [
+    "investment-memo.md"
+  ],
+  "support_artifacts": [
+    "evidence-log.csv",
+    "case-notes.md",
+    "routing.json",
+    "README.md"
+  ],
+  "handoffs": [
+    "Acquire 600183's product-grade revenue and gross margin split (annual report segment disclosure) to test H1 vs H2",
+    "Track whether 300476 holds 208.43 support, which discriminates the demand-deceleration reading from valuation digestion",
+    "Verify the 2026-09-21 insider disposal against the L1 announcement text and check for further disposals",
+    "Obtain an independent industry source for CCL grade pricing, since all pricing inferences here rest on downstream margins rather than on material-level prices"
+  ],
+  "source_scope": "hithink vendor statements/indicators/valuation/consensus and insider relays (L5), CNINFO periodic report body for the shareholder count (L1), SSE and SZSE margin files (L2), official CSI index history for the benchmark (L2), Yahoo v8 chart for prices (L5)",
+  "evidence_log_status": "21 rows, canonical v1.2 schema, every row carrying source_id, authority_level, source_date, as_of_date and freshness semantics",
+  "quant_gate_status": "passed",
+  "quant_dependency": "high",
+  "calculation_gate": "required",
+  "calculation_gate_basis": "The central claim is numeric (a PS-versus-ROE contradiction), so the ratios were recomputed rather than quoted: gross margin from gross_profit/revenue matches the vendor indicator to four decimals, net margin from net_income/revenue matches, and the ROE, turnover and leverage figures are read from the vendor indicator set with the leverage value explicitly marked vendor-published because no channel exposes its inputs",
+  "calculation_status": "recomputed_where_auditable",
+  "calculation_artifacts": [
+    "evidence-log.csv",
+    "investment-memo.md"
+  ],
+  "stale_after": "2026-11-03",
+  "must_refresh_if": [
+    "600183 discloses high-speed CCL product-level margin or revenue structure",
+    "any of the three closes below its invalidation level (600183 102.49; 002463 102.01)",
+    "300476 breaks 208.43 support, which would evidence the demand-deceleration reading",
+    "any of the three board makers posts gross margin materially below 35%, which would undercut the downstream-demand-intact reading"
+  ],
+  "notes": "Framework is supply-chain upstream/downstream validation, not same-industry peer comparison: CCL materials and PCB fabrication are different businesses (low-margin/high-turnover/low-leverage versus the reverse), and measuring one with the other's yardstick would report 600183 as uniformly inferior. 002463 and 300476 are used as downstream demand and price validators. The benchmark is 000300.SS, auto-selected and recorded; SPY is explicitly not used. Output contains no position, buy/sell or timing recommendation, because the user's holdings, weights, mandate and risk budget are unknown. Per-module staleness: technical 30d, valuation and consensus 90d, financials until the next reporting period; the manifest's stale_after is the shortest of these."
+}
