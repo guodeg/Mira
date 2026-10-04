@@ -274,10 +274,12 @@ def main(argv: list[str] | None = None) -> int:
 
     t = sub.add_parser("technical", help="compute technical context for a symbol")
     t.add_argument("symbol")
-    t.add_argument("--benchmark", default="SPY")
+    t.add_argument("--benchmark", default=None,
+                   help="benchmark index for relative strength. Omitted: inferred from the instrument's\n                         market (A-share 000300.SS, Hong Kong ^HSI, else SPY)")
     t.add_argument("--out", default="private/data-smoke")
     t.add_argument("--as-of", default=None)
-    t.add_argument("--market-scope", default="US")
+    t.add_argument("--market-scope", default=None,
+                   help="assert the market; inferred from the ticker when omitted")
     t.add_argument("--no-emit", action="store_true", help="print summary only, don't write files")
 
     fd = sub.add_parser("fundamentals", help="compute fundamental deltas (YoY/CAGR) for a symbol")
@@ -543,11 +545,17 @@ def _do_technical(args) -> int:
         return 1
 
     s = res.summary
-    print(f"# {args.symbol.upper()} technical context vs {args.benchmark.upper()} (as of {s['as_of']})")
+    # The benchmark and whether it was auto-selected must be visible: a relative-strength figure is
+    # meaningless without its baseline, and an auto-chosen one is the easiest to mistake for SPY.
+    annotation = res.row.get("benchmark_annotation") or res.row.get("benchmark") or "source_gap"
+    print(f"# {args.symbol.upper()} technical context vs {annotation} (as of {s['as_of']})")
+    if res.row.get("benchmark_automatic"):
+        print(f"  {'benchmark_basis':<24}: {res.row.get('benchmark_basis', '')}")
+        print(f"  {'benchmark_override':<24}: pass --benchmark <SYM> to compare against another index")
     for key in ("trend_state", "ma_stack_state", "volume_state", "volatility_state",
                 "positioning_risk", "technical_context_score"):
         print(f"  {key:<24}: {s[key]}")
-    print(f"  {'relative_return_3m':<24}: {s['relative_return_3m']}")
+    print(f"  {'relative_return_3m':<24}: {s['relative_return_3m']}  (vs {annotation})")
     lv = s["key_levels"]
     print(f"  {'close / inval / trigger':<24}: {s['close_price']} / {lv['invalidation']} / {lv['trigger']}")
     ac = s["actionability"]
@@ -563,10 +571,14 @@ def _do_technical(args) -> int:
     check_path = technical.emit_check_row(args.out, res.row)
     print(f"\n# emitted\n  {'technical_check':<20} {check_path}")
     if res.derived:
+        # Emit the RESOLVED benchmark and market, not the raw flags: with routing in play the flag
+        # can be None while the run used 000300.SS, and a manifest naming the wrong baseline would
+        # make every relative-strength record unreadable.
         result = emit_bundle(
             res.derived, out_dir=args.out, research_object=args.symbol.upper(),
-            market_scope=args.market_scope, endpoint="derived://tools/mira_data/technical",
-            params=f"symbol={args.symbol.upper()};benchmark={args.benchmark.upper()}",
+            market_scope=res.row.get("market_scope") or args.market_scope or "US",
+            endpoint="derived://tools/mira_data/technical",
+            params=f"symbol={args.symbol.upper()};benchmark={res.row.get('benchmark', 'source_gap')}",
         )
         for key in ("evidence_log", "calculation_ledger", "manifest", "ingestion_log"):
             if result.get(key):

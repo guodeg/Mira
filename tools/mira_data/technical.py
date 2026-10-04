@@ -18,9 +18,10 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import benchmarks
 from . import indicators as ind
 from . import config
-from .adapters import futu_opend, yahoo_chart
+from .adapters import csindex_index, futu_opend, yahoo_chart
 from .canonical import POSTURES, CanonicalRecord
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -54,8 +55,18 @@ def emit_check_row(out_dir: str, row: dict) -> str:
     return path
 
 
-def compute_technical(ticker: str, *, benchmark: str = "SPY", as_of: Optional[str] = None,
-                      market_scope: str = "US", lookback_days: int = 252) -> TechnicalResult:
+def compute_technical(ticker: str, *, benchmark: Optional[str] = None,
+                      as_of: Optional[str] = None,
+                      market_scope: Optional[str] = None, lookback_days: int = 252
+                      ) -> TechnicalResult:
+    # Benchmark routing: an explicit choice always wins; otherwise the instrument's own market
+    # decides. SPY was the unconditional default, which quietly mis-measured every A-share — the
+    # same stock scores 44 against SPY and 56 against 沪深300, a swing that flips the trend
+    # characterisation. The resolved value and whether it was automatic are both reported.
+    choice = benchmarks.resolve_benchmark(ticker, benchmark)
+    benchmark = choice.symbol
+    market_scope = market_scope or ("CN" if benchmarks.market_of(ticker) == "CN" else "US")
+
     as_of = as_of or _dt.date.today().isoformat()
     tkr = _fetch_technical_price(ticker)
     rows = tkr.series["rows"]
@@ -101,7 +112,11 @@ def compute_technical(ticker: str, *, benchmark: str = "SPY", as_of: Optional[st
 
     computed = {
         "case_id": "", "ticker": ticker.upper(), "market": market_scope, "as_of_date": as_of,
-        "price_source_id": tkr.records[0].posture.source_id, "benchmark": benchmark.upper(),
+        "price_source_id": tkr.records[0].posture.source_id,
+        "benchmark": benchmark,
+        "benchmark_automatic": choice.automatic,
+        "benchmark_basis": choice.reason,
+        "benchmark_annotation": choice.annotation,
         "sector_or_peer_benchmark": "source_gap", "lookback_days": lookback_days,
         "close_price": _r(close), "avg_daily_value_traded": _r(advt),
         "return_1m": _r(ret["1m"]), "return_3m": _r(ret["3m"]), "return_6m": _r(ret["6m"]),
@@ -191,19 +206,24 @@ def _levels(highs, lows, close, ma20, ma50, ma200) -> dict:
     swing_hi = max(_last(highs, 20)) if _last(highs, 20) else None
     swing_lo = min(_last(lows, 20)) if _last(lows, 20) else None
     support_candidates = [swing_lo, ma20, ma50, ma200]
-    support = ";".join(_fmt_levels(support_candidates))
-    resistance = ";".join(_fmt_levels([swing_hi]))
-    lower_supports = sorted(
-        [v for v in support_candidates if v is not None and v < close],
-        reverse=True,
-    )
+    # A SUPPORT must sit below the price and a RESISTANCE above it, so the exported strings are
+    # built from the side of the close each candidate falls on. Joining every candidate into
+    # `support` published levels above the price under a label saying otherwise: for a confirmed
+    # downtrend (300476: close 210.30, resistance 252.00) it listed 228.06, 236.96 AND 286.09 as
+    # support, i.e. three levels overhead plus the invalidation itself — a reader could not tell
+    # which side of the market they were on.
+    below = sorted([v for v in support_candidates if v is not None and v < close], reverse=True)
+    above = sorted([v for v in support_candidates if v is not None and v >= close])
+    if swing_hi is not None and swing_hi >= close:
+        above.append(swing_hi)
+        above = sorted(above)
     return {
-        "support": support or "source_gap",
-        "resistance": resistance or "source_gap",
+        "support": ";".join(_fmt_levels(below)) or "source_gap",
+        "resistance": ";".join(_fmt_levels(above)) or "source_gap",
         "trigger": _r(swing_hi) if swing_hi else "source_gap",
         "invalidation": _r(ma200) if ma200 else "source_gap",
-        "nearest_support": lower_supports[0] if lower_supports else None,
-        "next_support": lower_supports[1] if len(lower_supports) > 1 else None,
+        "nearest_support": below[0] if below else None,
+        "next_support": below[1] if len(below) > 1 else None,
         "swing_high": swing_hi,
     }
 
@@ -273,11 +293,11 @@ def _derived_records(ticker, benchmark, as_of, market_scope, ret, rel, rv20, mdd
     source_id = base.source_id
     bench_source_id = _benchmark_source_id(benchmark)
     up = f"{source_id}:{ticker.upper()}"
-    up_rel = f"{up};{bench_source_id}:{benchmark.upper()}"
+    up_rel = f"{up};{bench_source_id}:{benchmark}"
     specs = [
         ("return_3m", ret["3m"], "ratio", f"adjclose[-1]/adjclose[-64] - 1", up),
         ("relative_return_3m", rel["3m"], "ratio",
-         f"return_3m({ticker.upper()}) - return_3m({benchmark.upper()})", up_rel),
+         f"return_3m({ticker.upper()}) - return_3m({benchmark})", up_rel),
         ("realized_vol_20d", rv20, "annualized_stdev", "pstdev(logret[-20:]) * sqrt(252)", up),
         ("max_drawdown_from_recent_high_pct", mdd, "ratio", "min(close/running_peak - 1) over 252d", up),
         ("technical_context_score", score, "score_0_100", "50 + trend + rel3m_sign + volume_adj", up_rel),
@@ -310,17 +330,47 @@ def _derived_records(ticker, benchmark, as_of, market_scope, ret, rel, rv20, mdd
 
 def _benchmark_returns(benchmark: str) -> dict:
     try:
-        b = _fetch_technical_price(benchmark)
+        b = _fetch_technical_price(benchmark, for_benchmark=True)
     except Exception:
         return {k: None for k in ind.TD}
     adj = [_adjclose(r) for r in b.series["rows"]]
     return {k: ind.pct_return(adj, td) for k, td in ind.TD.items()}
 
 
-def _fetch_technical_price(symbol: str):
+def _fetch_technical_price(symbol: str, *, for_benchmark: bool = False):
+    """Fetch a price series, routing A-share indices to their official publisher.
+
+    For benchmarks this matters more than it looks: **Yahoo serves exactly ONE bar for 000300.SS**
+    on every range (1y, 2y, 5y, max — all return a single 2026-09-30 row), so a relative-strength
+    calculation against it silently yields ``None`` rather than a number. The controlling source for
+    a Chinese index is 中证指数公司, whose channel already returns 727 daily rows for 000300, so
+    benchmarks in the index map are read from there first.
+    """
+    if for_benchmark:
+        official = _official_index_series(symbol)
+        if official is not None:
+            return official
     if _default_market_provider() == "futu_opend":
         return futu_opend.fetch_historical_bars(symbol)
     return yahoo_chart.fetch_market_price(symbol, range_="2y")
+
+
+def _official_index_series(symbol: str):
+    """The official CSI/SSE index history as a ``market_price``-shaped result, or ``None``.
+
+    Only symbols in :data:`mira_data.benchmarks.BARE_INDEX_CODES` are routed here: the official
+    channel keys on a bare six-digit code, and quietly sending it a US ticker would produce a gap
+    rather than a fallback.
+    """
+    code = benchmarks.bare_index_code(symbol)
+    if not code:
+        return None
+    try:
+        # Returns the full history the publisher serves (727 daily rows for 000300), which is more
+        # than a 2y window needs — the return calculations take what they need from the tail.
+        return csindex_index.fetch_index_benchmark(code)
+    except net.FetchError:
+        return None
 
 
 def _default_market_provider() -> str:
