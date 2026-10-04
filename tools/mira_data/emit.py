@@ -324,6 +324,14 @@ SOURCE_POLICY = {
     # Shareholder-structure tables relayed by the aggregator: the numbers are the issuer's own
     # disclosed 前十名股东 / 前十名流通股东 tables, but the publisher is the relay, so the
     # speaker stays an aggregator and the issuer's filing is named as the upgrade route.
+    "eastmoney_dividend_api": dict(
+        provider="Eastmoney (东方财富)",
+        speaker="market",
+        license_scope="public_relay", storage_scope="tracked_allowed",
+        redistribution_allowed="no", readiness_impact="supports_working_view",
+        freshness_status="acceptable_for_period", confidence="medium",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
     "eastmoney_block_trade_api": dict(
         provider="Eastmoney (东方财富)",
         speaker="market",

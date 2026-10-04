@@ -20,7 +20,8 @@ from .adapters import (bea, bls, cboe_volatility, cftc_cot, chinamoney_rates,
                        cninfo_disclosure,
                        csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
-                       em_block_trade, exchange_disclosure, exchange_futures, exchange_margin,
+                       em_block_trade, em_dividend, exchange_disclosure, exchange_futures,
+                       exchange_margin,
                        exchange_northbound,
                        finra_short,
                        futures_inventory, hithink_special, treasury_fiscal,
@@ -45,7 +46,7 @@ _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activi
                     "executive_holdings", "lockup_schedule", "macro_fred",
                     "futures_member_rank", "futures_warehouse", "futures_basis",
                     "treasury_debt", "treasury_avg_interest", "cftc_cot",
-                    "dragon_tiger", "block_trade")
+                    "dragon_tiger", "block_trade", "dividend")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families that take NO symbol at all. They are not venue selectors, so they must not fall into
@@ -63,7 +64,7 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "futures_member_rank": "FUTURES",
                            "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
                            "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
-                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK"}
+                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK", "dividend": "DIVIDEND"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -107,6 +108,8 @@ FETCHERS = {
                        finra_short.fetch_short_interest, finra_short.ENDPOINT),
     "block_trade": ("A-share 大宗交易 block trades, per print or per stock (L5 relay)",
                     em_block_trade.fetch_block_trades, em_block_trade.ENDPOINT),
+    "dividend": ("A-share 分红送配: 分红方案/每股派息/股息率/除权除息日 (L5 relay)",
+                 em_dividend.fetch_dividends, em_dividend.ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -880,6 +883,8 @@ def _do_fetch(args) -> int:
         kwargs["limit"] = args.days
     elif family == "block_trade":
         kwargs.update(date=args.date, view=args.view, max_items=args.max_items)
+    elif family == "dividend":
+        kwargs["max_items"] = args.max_items
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -1002,6 +1007,12 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family == "dividend":
+        must_refresh_if = (
+            "the next 分红送配 announcement; the plan text, the record date and the ex-date are "
+            "published separately, so a plan read before its ex-date has not yet adjusted the "
+            "price and EX_DIVIDEND_DAYS is negative until it does"
+        )
     elif family == "block_trade":
         must_refresh_if = (
             "the session after the trade; block prints are published with the session's "
@@ -1106,7 +1117,7 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
         return {"dataset": "debt_to_penny" if family == "treasury_debt" else "avg_interest_rates"}
     if family == "cftc_cot":
         return {"dataset": "6dca-aqww"}
-    if family in {"dragon_tiger", "block_trade"}:
+    if family in {"dragon_tiger", "block_trade", "dividend"}:
         return {}       # these endpoint templates carry no placeholders
     if family.startswith("ibkr_"):
         return {

@@ -113,3 +113,4 @@ cftc_cot_api,official_macro_and_industry,L2 official CFTC weekly commitments-of-
 cboe_volatility_api,market_price_and_trading,L2 CBOE volatility index history (VIX complex),reviewed,"The calculating exchange publishes the file, so L2 rather than the L5 relayed price; record family is macro_series."
 finra_short_interest_api,regulatory_and_exchange,L2 official US consolidated short interest,reviewed,"Regulator-published dataset, so L2; record family is ownership_short_interest."
 eastmoney_block_trade_api,market_price_and_trading,L5 relay of A-share 大宗交易 block trades,reviewed,Market-data relay class; family is market_price and the tier stays L5 because the exchanges are the controlling source.
+eastmoney_dividend_api,market_price_and_trading,L5 relay of A-share 分红送配 dividend and rights records,reviewed,Market-data relay class; family is issuer_disclosure and the tier stays L5 because the issuer's formal filing is controlling.

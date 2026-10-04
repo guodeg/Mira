@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 分红送配: the relay's view of the issuer's own dividend declaration. L5 because the
+    # issuer's formal disclosure (cninfo/exchange) remains the controlling source.
+    "em_dividend": Posture(
+        source_id="eastmoney_dividend_api",
+        source_class="market_data",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # 大宗交易: the relay's view of the exchanges' negotiated block prints. L5 because the
     # exchanges published the same prints and remain controlling.
     "em_block_trade": Posture(
