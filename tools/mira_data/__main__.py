@@ -18,8 +18,8 @@ from functools import partial
 from . import config, fundamentals, net, screening, technical
 from .adapters import (bea, bls, chinamoney_rates, cninfo_disclosure, csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
-                       exchange_disclosure, exchange_margin, exchange_northbound, fred,
-                       futu_opend,
+                       exchange_disclosure, exchange_futures, exchange_margin, exchange_northbound,
+                       fred, futu_opend,
                        hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
                        investor_qa, nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
@@ -34,6 +34,7 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "executive_holdings", "lockup_schedule", "lockup_change",
                      "shareholders_top10", "shareholders_free_float")
 # Families that take the announcement-window flags (--since/--until/--max-items).
+# macro_fred is included because a FRED series read is likewise bounded by an observation
 # window plus a row cap, and both map onto the provider's own parameters.
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity",
                     "executive_holdings", "lockup_schedule", "macro_fred",
@@ -48,7 +49,6 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "macro_region": "REGION", "northbound_turnover": "NORTHBOUND",
                            "macro_fred": "FRED", "macro_bea": "BEA",
                            "futures_member_rank": "FUTURES"}
-
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -67,6 +67,9 @@ FETCHERS = {
                    fred.OBSERVATIONS_URL),
     "macro_bea": ("BEA official national/industry accounts (keyed)", bea.fetch_macro_dataset,
                   bea.DATA_URL),
+    "futures_member_rank": ("Exchange-published futures member rankings, SHFE or CZCE (L2)",
+                            exchange_futures.fetch_member_rankings,
+                            exchange_futures.SHFE_PM_URL),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -191,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="investor_qa only: keep answers from the last N days")
     f.add_argument("--expiry", default=None,
                    help="option_surface only: expiry month YYYY-MM (defaults to the nearest)")
+    f.add_argument("--regions", default=None,
+                   help="macro_region only: comma-separated region names, e.g. 北京,上海,广东")
     f.add_argument("--year", default=None,
                    help="macro_bea only: comma-separated years, e.g. 2024,2025,2026 "
                         "(defaults to the last 3)")
@@ -201,8 +206,6 @@ def main(argv: list[str] | None = None) -> int:
                    help="macro_bea only: Q (quarterly), A (annual) or M (monthly)")
     f.add_argument("--venue", default="SHFE", choices=("SHFE", "CZCE"),
                    help="futures_member_rank only: which exchange publishes the variety")
-    f.add_argument("--regions", default=None,
-                   help="macro_region only: comma-separated region names, e.g. 北京,上海,广东")
     f.add_argument("--region-kind", default="province", choices=("province", "city"),
                    help="macro_region only: province (31) or major-city (71) catalog")
     f.add_argument("--no-weights", action="store_true",
@@ -747,8 +750,8 @@ def _do_fetch(args) -> int:
               f"not {family}", file=sys.stderr)
         return 2
     if args.date and family not in {"margin_balance", "margin_market", "futures_member_rank"}:
-        print(f"error: --date applies to the margin_balance/margin_market families, "
-              f"not {family}", file=sys.stderr)
+        print(f"error: --date applies to the margin_balance/margin_market/futures_member_rank "
+              f"families, not {family}", file=sys.stderr)
         return 2
     if args.days and family != "investor_qa":
         print(f"error: --days applies to the investor_qa family, not {family}",
@@ -806,6 +809,8 @@ def _do_fetch(args) -> int:
                       observation_start=args.since, observation_end=args.until)
     elif family == "macro_bea":
         kwargs.update(year=args.year, dataset=args.dataset, frequency=args.frequency)
+    elif family == "futures_member_rank":
+        kwargs.update(venue=args.venue, date=args.date, rank_limit=args.max_items)
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -928,18 +933,18 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family == "futures_member_rank":
+        must_refresh_if = (
+            "the next session; the exchange publishes after the close and a session can be "
+            "missing, so the adapter walks back a bounded number of days and records both "
+            "the requested and the used date"
+        )
     elif family in {"shareholders_top10", "shareholders_free_float"}:
         must_refresh_if = (
             "the next periodic-report window (annual/Q1 by Apr 30, interim by Aug 31, Q3 by "
             "Oct 31), or a new shareholding disclosure; the channel reads the newest period "
             "only, so the issuer's own top-ten table is the L1 cross-check before a durable "
             "ownership conclusion"
-        )
-    elif family in {"macro_fred", "macro_bea"}:
-        must_refresh_if = (
-            "the next official release or data revision; FRED returns the currently-known "
-            "vintage unless a vintage is requested, and BEA revises its accounts on its own "
-            "schedule"
         )
     else:
         must_refresh_if = ""
@@ -983,6 +988,11 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
             "host": config.get("MIRA_FUTU_HOST", "127.0.0.1") or "127.0.0.1",
             "port": config.get("MIRA_FUTU_PORT", "11111") or "11111",
         }
+    if family == "futures_member_rank":
+        # The endpoint template carries a session placeholder; the adapter resolves the
+        # actual session (walking back when the requested one has not published), so the
+        # manifest records the requested date and each claim records the used one.
+        return {"date": "YYYYMMDD"}
     return {
         "host": config.get("MIRA_IBKR_HOST", "127.0.0.1") or "127.0.0.1",
         "port": config.get("MIRA_IBKR_PORT", "7497") or "7497",

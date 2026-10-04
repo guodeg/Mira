@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**105 rows** (29 of them `public_api`); `tools/mira_data/` ships **36 fetch families, 23 usable
+**107 rows** (31 of them `public_api`); `tools/mira_data/` ships **39 fetch families, 26 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**27 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**29 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -594,6 +594,114 @@ report does not, so "newest body" alone reports a false gap. Verified against �
 holders, 1,437,780,910 shares released — which matches the standalone 限售股上市流通公告 for the same
 event. An issuer whose section is 不适用 yields `cninfo_lockup_not_applicable`, not an empty holder
 list.
+
+**FRED and BEA: the keyed US macro publishers, wired once the key gate was built.**
+`mira_data fetch macro_fred DGS10` and `macro_bea T10101 --dataset NIPA --frequency Q` close the
+"official macro is BLS-only" half of §2's diagnosis. Both are L2 fact-grade like BLS, and both
+require a free key, so the first thing needed was a *key gate* that behaves like the SEC contact
+gate: with `FRED_API_KEY` / `BEA_API_KEY` unset the fetch degrades to a labelled
+`fred_key_gap` / `bea_key_gap` naming the file to edit, never a silent empty read.
+
+Building that gate surfaced a Python detail worth writing down, because the first two attempts
+both looked right. `net` imports `config`, so `config` cannot name `net.FetchError`; a gap has to
+be an instance of it, since every adapter catches that class. Defining the exception in `config`
+and having `FetchError` inherit it produces a correct-looking MRO in which `except FetchError`
+**still misses the gap** — because what gets raised is the *parent*, and `except` on a child does
+not catch its base. The fix is late binding: `net` registers `FetchError` with `config` at import,
+and `require_api_key` raises whatever is registered. A test pins it, since the failure mode is
+silent.
+
+Two provider quirks were measured rather than assumed, and both would otherwise publish a wrong
+answer:
+
+- **FRED drops the connection** when a request advertises `Accept-Encoding: gzip, deflate`, which
+  is what `net`'s shared helper sends. The same URL with `identity` returns the full body
+  (6,398 bytes / 319 lines vs a connection error), so the adapter opts out of compression. FRED's
+  missing observation is the literal `.` and is **dropped, not zeroed** — a zero is a claim the
+  source never made. Vintages travel in provenance because FRED returns the currently-known
+  revision by default.
+- **BEA reports rejection inside an HTTP 200 payload** (`BEAAPI.Results.Error`; measured: an
+  inactive key returns `APIErrorCode` 4, an unknown key code 1). A 200-only check would emit an
+  empty series from a refused request, so the envelope is inspected before any data is read, and
+  a credential error is split from a source error. Suppressed cells (`(D)`/`(NA)`/`(L)`/`(NM)`)
+  are dropped rather than zeroed, and BEA's shared `DEMO` id is deliberately not used as a
+  fallback: it is not active, so it could only ever produce a gap dressed up as a read.
+
+**Verified live (FRED).** With a real key configured, `macro_fred` returns real observations:
+DGS10 5.24 on 2026-10-01 with 23 usable rows, DFF 3.88, CPIAUCSL 334.131, UNRATE 4.2, and the
+`--since/--until` window narrows the read as intended. Bundle validation is clean, and a
+deliberately invalid key produces `fred_key_gap` ("may be invalid or not yet activated") rather
+than a generic source gap.
+
+**One more trap that only a live call could find: the key was being written into the evidence
+log.** FRED takes its credential as a query parameter, and the adapter recorded the request URL
+verbatim as `url_or_path` — a *tracked* field. The first real fetch wrote
+`api_key=<the real key>` straight into `evidence-log.csv`. It was caught by reading the emitted row,
+not by any test, and it is worth being precise about the blast radius: the file lives under
+gitignored `private/`, and `git grep` confirmed the key never entered a tracked file or a commit.
+The fix is provider-agnostic rather than FRED-specific — `net.redact_url` blanks any value whose
+parameter name looks like a credential (``api_key``/``apikey``/``key``/``userid``/``token``/…,
+case-insensitive, idempotent), and both adapters pass their recorded URL through it, so a future
+keyed adapter inherits the protection without opting in. A regression test asserts the secret is
+absent from the *recorded* field, not merely that the helper works.
+
+Note also that `emit_bundle` **appends** to `evidence-log.csv`, so a re-run into the same `--out`
+directory accumulates rows; the tainted bundle had to be deleted rather than overwritten.
+
+**BEA verified live as well.** `macro_bea` returns real accounts: NIPA T10105 line 1 (GDP, levels)
+31,906,274 for 2026-Q1, T10106 line 1 (real GDP, chained dollars) 24,274,383, and T10101 line 1
+(percent change, annual rate) 2.5 — three different bases from three tables, which is the point of
+the next paragraph. Bundle validation is clean and the key is redacted from the recorded URL.
+
+**A live read also exposed a design flaw the mocked contract hid: a BEA table is not one series.**
+T10105 alone returns GDP, personal consumption, goods, services, structures and more — 150 rows
+across a dozen line items — while the first version emitted `metric="NIPA.T10101"` with
+`unit="value"`. That made `NIPA.T10101 0.1` (a percent change) indistinguishable from a level, and
+left the reader unable to tell whether a figure was GDP or "Goods". Both are now derived per row:
+
+- the **line is part of the metric** (`NIPA.T10105.line1`), with `lineNumber` and
+  `lineDescription` in provenance, because a BEA number is meaningless without them;
+- the **unit comes from BEA's own `CL_UNIT` / `UNIT_MULT` / `METRIC_NAME`** instead of a guessed
+  `"value"`: `Level` at `UNIT_MULT` 6 becomes `millions_usd`, `Percent change, annual rate`
+  becomes `percent_annual_rate`, and `Level` + `Chained Dollars` becomes
+  `millions_chained_dollars` — a bare `millions` there would imply a current-dollar basis the
+  number does not have. The bulk CSV carries `line_number` and `unit` per row for the same reason.
+
+Writing that unit parser produced two silent bugs, both caught by tests and both worth noting
+because each yielded a *plausible* token rather than an error: `str.strip("_")` removes from
+**both** ends, so `"index"` was mangled to `nde` and then `_ndex`; and a label already stating its
+own magnitude (`Millions of dollars`) was double-prefixed into `millions_millions_of_dollars`. The
+composition now joins explicitly, strips only a leading separator, and skips the scale prefix when
+the label carries one.
+
+**Futures member rankings: two exchanges wired at L2, two not reachable.** `mira_data fetch
+futures_member_rank cu --venue SHFE` and `... AP --venue CZCE` read the exchange's own member
+position ranking — per-instrument top members with volume, long positions and short positions
+plus their day changes. The exchange is the controlling source for its own market statistics, so
+this is genuine L2; the hithink CLI carries the same tables at L5, and only the L2 read can anchor
+a positioning claim on its own. Both venues were probed live on 2026-10-03:
+
+- **SHFE** publishes a JSON file per session at
+  `/data/tradedata/future/dailydata/pm{YYYYMMDD}.dat` (528 KB, 1,700 rows). The three ranked
+  tables arrive **side by side in one row**, and a row's instrument is either the variety
+  aggregate (`cuall`) or one coded contract (`cu2610`).
+- **CZCE** publishes a pipe-delimited text file per session (440 KB, 2,962 lines): one table per
+  variety behind a `品种：… 日期：…` header, with `rank|member|volume|Δ|member|long|Δ|member|short|Δ`.
+  It is **UTF-8** (decoding it as GBK produced mojibake on the first probe), and the variety label
+  glues the Chinese name to the ticker (`苹果AP`) so the requested code is the *trailing* ascii run.
+
+Three traps were found by probing rather than assuming, and each produced a plausible wrong
+answer: matching SHFE instruments on a bare prefix swallowed 331 rows across unrelated series
+(`cu` also prefixes `cual`); matching CZCE on a prefix found **nothing**, because every header
+starts with the Chinese name; and collapsing the three side-by-side tables would attribute one
+member's long book to a different member, since the members differ per side.
+
+**Not wired, and the reasons are recorded rather than left as "todo":** DCE answers **HTTP 412** to
+a scripted client, CFFEX serves **HTML where a CSV is expected**, and GFEX answered **HTTP 520**
+when probed. The adapter refuses an unwired venue by name and lists what was tried, so nobody
+repeats the search. **Warehouse receipts (仓单) and basis are not in this channel** — SHFE's stock
+file was probed at five plausible paths and is at none of them, so it needs its own investigation
+rather than a guessed URL. The L2 gap item therefore closes only partially.
 
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
