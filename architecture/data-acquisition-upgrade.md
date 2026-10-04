@@ -776,6 +776,35 @@ the API's default ordering is alphabetical — so the minor market was being sur
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
 
+**Item 13 (US estimates / options / holders): options advanced at L2, estimates stay licensed.**
+The gap list proposed `yfinance`. Probing found a better answer for the options half and a
+licensing wall for the estimates half.
+
+**Options and implied volatility — done from the exchange, with no new dependency.** CBOE's
+published history was extended from 9 to **19** volatility series, all verified live 2026-10-04:
+the VIX complex, the regional and asset IV indices (`VXN`, `RVX`, `VXD`, `GVZ`, `OVX`, `VXEEM`,
+`VXEWZ`, `VXSLV`, `VXGDX`) and the **single-stock** IV indices (`VXAPL`, `VXAZN`, `VXGOG`,
+`VXGS`, `VXIBM` — VXAPL read 26.75). Separately, CBOE's delayed-quote endpoint carries the
+**published 30-day implied volatility** the history files do not: `cboe_implied_vol` reads
+SPX iv30 **12.168%**, NDX **18.145%**, RUT **18.168%**, alongside the index level.
+
+The quote's contract is worth stating because it is easy to misread: it is a calculation over the
+**prior session** — the payload's own `last_trade_time` said 2026-10-02 while the file was served
+on 2026-10-04 — so `last_trade_time` is recorded rather than the retrieval date. CBOE serves
+these quotes only for its own index products, so a single-stock symbol answers **HTTP 403**, and
+VVIX reports `iv30` as **0**, which is an absent value rather than a zero volatility and is
+refused rather than published. **Why not `yfinance`:** the exchange figure for the same ground is
+L2 and needs no third-party dependency, and the repo already prefers the controlling source —
+`yfinance` is not installed here at all.
+
+**Estimates stay a genuine licensing gap.** No keyless official source exists for US sell-side
+consensus: it is vendor product (Refinitiv, FactSet, Bloomberg). `consensus_estimate` covers the
+A-share side through a free relay, and there is no equivalent for US names, so this half is
+recorded as licensed rather than half-built.
+
+**Holders were already covered** through the SEC channel (`sec_companyfacts`, insiders) rather
+than needing a new adapter.
+
 **Market coverage beyond US and CN: no adapter was needed, only discovery.** The L5 gap
 list said `market_price` was "US(Yahoo)+CN only". Probing showed the opposite for single
 names: HK, JP, TW, KR and four EU markets all read through the same family with correct

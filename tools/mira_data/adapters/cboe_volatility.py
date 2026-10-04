@@ -50,8 +50,29 @@ SERIES = {
     "VVIX": ("volatility of VIX", "VIX"),
     "VXN": ("Nasdaq-100 implied volatility", "Nasdaq-100"),
     "RVX": ("Russell 2000 implied volatility", "Russell 2000"),
+    "VXD": ("Dow Jones industrial average implied volatility", "DJIA"),
     "GVZ": ("gold ETF implied volatility", "gold"),
     "OVX": ("crude-oil ETF implied volatility", "crude oil"),
+    "VXEEM": ("emerging-markets ETF implied volatility", "emerging markets"),
+    "VXEWZ": ("Brazil ETF implied volatility", "Brazil"),
+    "VXSLV": ("silver ETF implied volatility", "silver"),
+    "VXGDX": ("gold-miners ETF implied volatility", "gold miners"),
+    "VXAPL": ("Apple implied volatility", "Apple"),
+    "VXAZN": ("Amazon implied volatility", "Amazon"),
+    "VXGOG": ("Google implied volatility", "Alphabet"),
+    "VXGS": ("Goldman Sachs implied volatility", "Goldman Sachs"),
+    "VXIBM": ("IBM implied volatility", "IBM"),
+}
+
+# The delayed-quote endpoint carries a 30-day implied volatility that the history files do not.
+QUOTE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/quotes/{symbol}.json"
+QUOTE_ENDPOINT = "cboe://delayed-quote/{symbol}"
+# Products whose iv30 was verified meaningful. VVIX returns 0 here, which is not an
+# observation, so it is deliberately absent rather than published as a zero volatility.
+QUOTE_SYMBOLS = {
+    "_SPX": ("S&P 500", "SPX"),
+    "_NDX": ("Nasdaq-100", "NDX"),
+    "_RUT": ("Russell 2000", "RUT"),
 }
 
 
@@ -93,8 +114,8 @@ def fetch_volatility_index(
         value=latest["value"], unit="index_points", period=latest["date"],
         period_type="point_in_time", as_of_date=as_of, source_date=latest["date"],
         posture=posture, url_or_path=url,
-        claim_text=(f"CBOE {code}（{described}，标的 {underlying}）"
-                    f"{latest['date']} 收盘 {latest['value']}"),
+        claim_text=(f"CBOE {code} ({described}, underlying {underlying}) "
+                    f"closed {latest['value']} on {latest['date']}"),
         provenance={
             "symbol": code, "seriesDescription": described, "underlying": underlying,
             "observationDate": latest["date"],
@@ -113,6 +134,91 @@ def fetch_volatility_index(
     )
     series = {"name": f"cboe-{code}", "columns": SERIES_COLUMNS, "rows": recent}
     return FetchResult([record], series=series)
+
+
+def fetch_implied_volatility(
+    symbol: str = "_SPX",
+    *,
+    as_of: Optional[str] = None,
+    market_scope: str = "US",
+    limit: Optional[int] = None,
+) -> FetchResult:
+    """CBOE's published 30-day implied volatility for one index product, plus its level.
+
+    This is the IV the history files do not carry: the ``iv30`` field on CBOE's delayed-quote
+    endpoint, measured live 2026-10-04 at SPX 12.168%, NDX 18.145%, RUT 18.168%.
+
+    Two honesty notes travel with the record. The quote is a **calculation on the prior session**
+    (the payload's own `last_trade_time` said 2026-10-02 while the file was served on 2026-10-04),
+    so `last_trade_time` is recorded rather than the retrieval time. And ``iv30`` is a
+    *published* figure, not one Mira derives from an option chain, so it is a reported metric.
+    """
+    as_of = as_of or _dt.date.today().isoformat()
+    code = (symbol or "_SPX").strip().upper()
+    if not code.startswith("_"):
+        code = "_" + code
+    if code not in QUOTE_SYMBOLS:
+        raise net.FetchError(
+            f"cboe_quote_gap: {symbol!r} does not carry a usable iv30; the verified products are "
+            f"{'/'.join(sorted(QUOTE_SYMBOLS))}. CBOE serves delayed quotes for its index "
+            "products only - a single-stock symbol answers HTTP 403 - and VVIX reports iv30 as "
+            "0, which is an absent value rather than a zero volatility, so neither is published")
+    described, short = QUOTE_SYMBOLS[code]
+    url = QUOTE_URL.format(symbol=code)
+    envelope = net.get_json(url, headers=HEADERS, retries=2, backoff=1.5)
+    data = (envelope or {}).get("data") or {}
+    iv30 = _num(data.get("iv30"))
+    if iv30 is None or iv30 <= 0:
+        raise net.FetchError(
+            f"cboe_quote_gap: {code} returned iv30={data.get('iv30')!r}, which is not a usable "
+            "implied volatility; a zero here means the provider has no value, not calm markets")
+
+    traded = str(data.get("last_trade_time") or "")
+    day = traded[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", traded) else as_of
+    posture = POSTURES["cboe_quote"]
+    records = [
+        CanonicalRecord(
+            family="macro_series", research_object=f"CBOE_IV30_{short}",
+            market_scope=market_scope, metric=f"{short.lower()}_iv30",
+            value=iv30, unit="percent", period=day, period_type="point_in_time",
+            as_of_date=as_of, source_date=day, posture=posture, url_or_path=url,
+            claim_text=f"CBOE {short} 30-day implied volatility (iv30) = {iv30}% on {day}",
+            provenance={
+                "symbol": code, "product": described, "iv30Percent": iv30,
+                "iv30Change": _num(data.get("iv30_change")),
+                "iv30ChangePercent": _num(data.get("iv30_change_percent")),
+                "securityType": data.get("security_type"),
+                "exchangeId": data.get("exchange_id"),
+                "lastTradeTime": traded or None,
+                "envelopeTimestamp": envelope.get("timestamp"),
+                "notDerived": ("iv30 is a figure CBOE publishes, not one Mira derives from an "
+                               "option chain, so it carries no calculation ledger"),
+                "stalenessNote": ("the quote is a calculation over the prior session - the "
+                                  "payload's last_trade_time can lag the envelope timestamp by "
+                                  "days, so last_trade_time is recorded rather than the "
+                                  "retrieval date"),
+            },
+        ),
+        CanonicalRecord(
+            family="macro_series", research_object=f"CBOE_LEVEL_{short}",
+            market_scope=market_scope, metric=f"{short.lower()}_level",
+            value=_num(data.get("current_price")) or 0.0, unit="index_points",
+            period=day, period_type="point_in_time", as_of_date=as_of, source_date=day,
+            posture=posture, url_or_path=url,
+            claim_text=(f"CBOE {short} level {_num(data.get('current_price'))} on {day} "
+                        f"(prior close {_num(data.get('prev_day_close'))})"),
+            provenance={
+                "symbol": code, "currentPrice": _num(data.get("current_price")),
+                "prevDayClose": _num(data.get("prev_day_close")),
+                "bid": _num(data.get("bid")), "ask": _num(data.get("ask")),
+                "volume": _num(data.get("volume")),
+                "lastTradeTime": traded or None,
+                "crossCheckNote": ("this is the same ground as the Yahoo quote at L5; the "
+                                   "exchange figure is the controlling one when they differ"),
+            },
+        ),
+    ]
+    return FetchResult(records)
 
 
 def _parse_history(text: str, symbol: str) -> list[dict]:

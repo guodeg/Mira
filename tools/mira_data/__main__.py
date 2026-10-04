@@ -59,7 +59,7 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "futures_member_rank": "FUTURES",
                            "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
                            "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
-                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE"}
+                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -93,8 +93,10 @@ FETCHERS = {
                               treasury_fiscal.AVG_INTEREST_URL),
     "cftc_cot": ("CFTC Commitments of Traders positioning (L2)", cftc_cot.fetch_cot_family,
                  cftc_cot.SOCRATA_URL),
-    "cboe_volatility": ("CBOE volatility indices: VIX/VIX9D/VIX3M/VIX6M/VVIX/VXN/RVX/GVZ/OVX (L2)",
+    "cboe_volatility": ("CBOE volatility index history: 19 series incl. VIX complex (L2)",
                         cboe_volatility.fetch_volatility_index, cboe_volatility.ENDPOINT),
+    "cboe_implied_vol": ("CBOE published 30-day implied volatility (iv30) and index level (L2)",
+                         cboe_volatility.fetch_implied_volatility, cboe_volatility.QUOTE_ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,

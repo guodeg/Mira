@@ -128,8 +128,88 @@ def test_unwired_symbol_is_refused_with_the_wired_list() -> None:
 def test_every_wired_symbol_is_described() -> None:
     for symbol, (described, underlying) in cb.SERIES.items():
         assert described and underlying, symbol
-    assert len(cb.SERIES) == 9, sorted(cb.SERIES)
-    print("ok all nine wired volatility indices carry a description and an underlying")
+    # 9 at first, then 10 more verified (VXD, emerging/Brazil/silver/gold-miner ETFs, and the
+    # single-stock IV indices VXAPL/VXAZN/VXGOG/VXGS/VXIBM).
+    assert len(cb.SERIES) == 19, sorted(cb.SERIES)
+    assert "VXAPL" in cb.SERIES and "VXEEM" in cb.SERIES
+    print("ok all nineteen wired volatility indices carry a description and an underlying")
+
+
+QUOTE_PAYLOAD = {"timestamp": "2026-10-04 04:52:04", "symbol": "^SPX", "data": {
+    "symbol": "^SPX", "security_type": "index", "exchange_id": 5,
+    "current_price": 7722.7202, "price_change": 56.2702, "price_change_percent": 0.7286,
+    "bid": 7683.7798, "ask": 7759.6299, "open": 7726.2402, "high": 7754.6699,
+    "low": 7700.5098, "close": 7722.72, "prev_day_close": 7722.7202, "volume": 0,
+    "iv30": 12.168, "iv30_change": 0.0, "iv30_change_percent": 0.0,
+    "last_trade_time": "2026-10-02T16:14:59", "tick": "up"}}
+
+
+def test_iv30_is_published_and_dated_by_last_trade() -> None:
+    with mock.patch.object(cb.net, "get_json", return_value=QUOTE_PAYLOAD):
+        result = cb.fetch_implied_volatility("SPX", as_of="2026-10-04")
+    iv = result.records[0]
+    assert iv.value == 12.168 and iv.unit == "percent"
+    # The observation date must come from the trade, not from when we happened to ask: the
+    # payload was served on 2026-10-04 but its last trade was 2026-10-02.
+    assert iv.period == "2026-10-02", iv.period
+    assert iv.provenance["lastTradeTime"] == "2026-10-02T16:14:59"
+    assert iv.provenance["envelopeTimestamp"] == "2026-10-04 04:52:04"
+    assert "prior session" in iv.provenance["stalenessNote"]
+    # CBOE publishes iv30; Mira does not derive it from a chain, so it owes no ledger.
+    assert iv.posture.claim_type == "reported_metric"
+    assert iv.derived is False
+    assert "not one Mira derives" in iv.provenance["notDerived"]
+    level = result.records[1]
+    assert level.value == 7722.7202 and level.unit == "index_points"
+    assert "same ground as the Yahoo quote" in level.provenance["crossCheckNote"]
+    print("ok iv30 is a published metric dated by last_trade_time, not by retrieval")
+
+
+def test_iv30_refuses_products_without_a_usable_value() -> None:
+    # VVIX reports iv30 as 0 on the live endpoint. It is not whitelisted, so it is refused by
+    # the symbol check rather than published as calm markets.
+    try:
+        cb.fetch_implied_volatility("VVIX", as_of="2026-10-04")
+    except net.FetchError as exc:
+        assert "cboe_quote_gap" in str(exc)
+        assert "VVIX" not in cb.QUOTE_SYMBOLS
+    else:
+        raise AssertionError("a product without a verified iv30 must be refused")
+    # And the zero guard itself fires for a whitelisted product whose value goes absent.
+    zero = {"timestamp": "t", "data": dict(QUOTE_PAYLOAD["data"], iv30=0)}
+    with mock.patch.object(cb.net, "get_json", return_value=zero):
+        try:
+            cb.fetch_implied_volatility("SPX", as_of="2026-10-04")
+        except net.FetchError as exc:
+            assert "calm markets" in str(exc), "the gap should say why a zero is not a reading"
+        else:
+            raise AssertionError("iv30=0 must be a gap, not a zero volatility")
+    # CBOE answers 403 for single-stock symbols, so they are refused by name up front.
+    try:
+        cb.fetch_implied_volatility("AAPL", as_of="2026-10-04")
+    except net.FetchError as exc:
+        message = str(exc)
+        assert "cboe_quote_gap" in message and "403" in message
+        for wired in ("_SPX", "_NDX", "_RUT"):
+            assert wired in message, (wired, message)
+    else:
+        raise AssertionError("an unquoted symbol must be refused rather than fetched")
+    # The bare name is accepted and normalised to the wire form.
+    with mock.patch.object(cb.net, "get_json", return_value=QUOTE_PAYLOAD) as getter:
+        cb.fetch_implied_volatility("NDX", as_of="2026-10-04")
+    assert "_NDX.json" in getter.call_args[0][0]
+    print("ok iv30 refuses absent values and unquoted products, and normalises the symbol")
+
+
+def test_claim_text_matches_the_declared_source_language() -> None:
+    # The SOURCE_POLICY for this source declares source_language=en, so the claim text must be
+    # English; Chinese text under an "en" label is a mislabel, not a style choice.
+    with mock.patch.object(cb.net, "get_json", return_value=QUOTE_PAYLOAD):
+        for rec in cb.fetch_implied_volatility("SPX", as_of="2026-10-04").records:
+            assert not any("\u4e00" <= ch <= "\u9fff" for ch in rec.claim_text), rec.claim_text
+    for rec in _fetch(OHLC_CSV).records:
+        assert not any("\u4e00" <= ch <= "\u9fff" for ch in rec.claim_text), rec.claim_text
+    print("ok claim text is English, matching the declared source language")
 
 
 def main() -> int:
@@ -140,6 +220,9 @@ def main() -> int:
     test_tier_basis_survives_into_provenance()
     test_unwired_symbol_is_refused_with_the_wired_list()
     test_every_wired_symbol_is_described()
+    test_iv30_is_published_and_dated_by_last_trade()
+    test_iv30_refuses_products_without_a_usable_value()
+    test_claim_text_matches_the_declared_source_language()
     print("mira_data_cboe_volatility_tests: pass")
     return 0
 
