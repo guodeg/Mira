@@ -451,6 +451,28 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # The US Treasury's own public API and the CFTC's own COT endpoint: keyless official
+    # statistics, so L2 fact-grade rather than a relay of the same ground.
+    "treasury_fiscal": Posture(
+        source_id="treasury_fiscal_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "cftc_cot": Posture(
+        source_id="cftc_cot_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # Futures warehouse receipts and basis: aggregator tier, and labelled as such because the
     # exchange stock files are unreachable (see futures_inventory's module docstring).
     "em_futures_inventory": Posture(

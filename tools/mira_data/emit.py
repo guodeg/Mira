@@ -288,6 +288,23 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Official US agencies' own keyless APIs. English source text, so no translation basis.
+    "treasury_fiscal_api": dict(
+        provider="U.S. Department of the Treasury (Fiscal Data API)",
+        speaker="official_statistics",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="en", translation_basis="not_translated",
+    ),
+    "cftc_cot_api": dict(
+        provider="U.S. Commodity Futures Trading Commission (Socrata public reporting)",
+        speaker="official_statistics",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="en", translation_basis="not_translated",
+    ),
     # Shareholder-structure tables relayed by the aggregator: the numbers are the issuer's own
     # disclosed 前十名股东 / 前十名流通股东 tables, but the publisher is the relay, so the
     # speaker stays an aggregator and the issuer's filing is named as the upgrade route.

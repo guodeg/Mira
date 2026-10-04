@@ -16,10 +16,11 @@ import sys
 from functools import partial
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bea, bls, chinamoney_rates, cninfo_disclosure, csindex_index,
+from .adapters import (bea, bls, cftc_cot, chinamoney_rates, cninfo_disclosure,
+                       csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
                        exchange_disclosure, exchange_futures, exchange_margin, exchange_northbound,
-                       futures_inventory,
+                       futures_inventory, treasury_fiscal,
                        fred, futu_opend,
                        hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
                        investor_qa, nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
@@ -39,9 +40,14 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
 # window plus a row cap, and both map onto the provider's own parameters.
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity",
                     "executive_holdings", "lockup_schedule", "macro_fred",
-                    "futures_member_rank", "futures_warehouse", "futures_basis")
+                    "futures_member_rank", "futures_warehouse", "futures_basis",
+                    "treasury_debt", "treasury_avg_interest", "cftc_cot")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
+# Families that take NO symbol at all. They are not venue selectors, so they must not fall into
+# the "BOTH" default above - that default is a venue choice, and passing it as a symbol made
+# `treasury_debt` receive the literal string "BOTH" as its dataset.
+_SYMBOL_LESS_FAMILIES = ("treasury_debt", "treasury_avg_interest", "cftc_cot")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
@@ -50,7 +56,9 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "macro_region": "REGION", "northbound_turnover": "NORTHBOUND",
                            "macro_fred": "FRED", "macro_bea": "BEA",
                            "futures_member_rank": "FUTURES",
-                           "futures_warehouse": "FUTURES", "futures_basis": "FUTURES"}
+                           "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
+                           "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
+                           "cftc_cot": "CFTC"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -77,6 +85,13 @@ FETCHERS = {
                           futures_inventory.EM_ENDPOINT),
     "futures_basis": ("Futures main-continuous basis: spot vs close/settle (L5 vendor)",
                       futures_inventory.fetch_basis, futures_inventory.BASIS_ENDPOINT),
+    "treasury_debt": ("US Treasury Debt to the Penny: total public debt outstanding (L2)",
+                      treasury_fiscal.fetch_treasury_series, treasury_fiscal.DEBT_URL),
+    "treasury_avg_interest": ("US Treasury average interest rates by security type (L2)",
+                              treasury_fiscal.fetch_avg_interest,
+                              treasury_fiscal.AVG_INTEREST_URL),
+    "cftc_cot": ("CFTC Commitments of Traders positioning (L2)", cftc_cot.fetch_cot_family,
+                 cftc_cot.SOCRATA_URL),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -760,7 +775,7 @@ def _do_fetch(args) -> int:
         print(f"error: --date applies to the margin_balance/margin_market/futures_member_rank "
               f"families, not {family}", file=sys.stderr)
         return 2
-    if args.days and family not in {"investor_qa", "futures_warehouse"}:
+    if args.days and family not in {"investor_qa", "futures_warehouse", "cftc_cot"}:
         print(f"error: --days applies to the investor_qa family, not {family}",
               file=sys.stderr)
         return 2
@@ -779,8 +794,11 @@ def _do_fetch(args) -> int:
     symbol = args.symbol
     if family in {"ibkr_positions", "ibkr_account_summary"} and not symbol:
         symbol = config.get("MIRA_IBKR_ACCOUNT", "ALL") or "ALL"
-    elif family in _MARKET_SERIES_FAMILIES and not symbol:
+    elif family in _MARKET_SERIES_FAMILIES and family not in _SYMBOL_LESS_FAMILIES and not symbol:
         symbol = "BOTH"
+    elif family in _SYMBOL_LESS_FAMILIES:
+        # An optional positional symbol may still be given (cfct_cot takes a market filter).
+        symbol = symbol or ""
     elif not symbol:
         print(f"error: fetch {args.family} requires a symbol", file=sys.stderr)
         return 2
@@ -822,6 +840,16 @@ def _do_fetch(args) -> int:
         kwargs.update(days=args.days, max_items=args.max_items)
     elif family == "futures_basis":
         kwargs["max_items"] = args.max_items
+    elif family in {"treasury_debt", "treasury_avg_interest"}:
+        # The dataset is fixed per family, so an optional symbol here is a mistake rather
+        # than a selector: reject it instead of silently treating it as a dataset name.
+        if symbol:
+            print(f"error: {family} takes no symbol (it reads a fixed Treasury dataset)",
+                  file=sys.stderr)
+            return 2
+        kwargs["limit"] = args.max_items
+    elif family == "cftc_cot":
+        kwargs.update(weeks=args.days, max_items=args.max_items)
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -944,6 +972,16 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family in {"treasury_debt", "treasury_avg_interest"}:
+        must_refresh_if = (
+            "the next business day for the debt stock (published daily with a lag) or the next "
+            "monthly release for average interest rates"
+        )
+    elif family == "cftc_cot":
+        must_refresh_if = (
+            "the next weekly COT release (positions as of Tuesday, published the following "
+            "Friday), so a report read mid-week is already a week old"
+        )
     elif family in {"futures_warehouse", "futures_basis"}:
         must_refresh_if = (
             "the next session; both are aggregator relays, and the official stock file is not "
@@ -1015,6 +1053,11 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
         return {"variety": "<variety>", "date": "YYYYMMDD"}
     if family == "futures_basis":
         return {}       # the vendor endpoint template carries no placeholders
+    if family in {"treasury_debt", "treasury_avg_interest"}:
+        # The template names the dataset; each family fixes its own.
+        return {"dataset": "debt_to_penny" if family == "treasury_debt" else "avg_interest_rates"}
+    if family == "cftc_cot":
+        return {"dataset": "6dca-aqww"}
     return {
         "host": config.get("MIRA_IBKR_HOST", "127.0.0.1") or "127.0.0.1",
         "port": config.get("MIRA_IBKR_PORT", "7497") or "7497",

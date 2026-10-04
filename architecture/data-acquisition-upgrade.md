@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**109 rows** (33 of them `public_api`); `tools/mira_data/` ships **41 fetch families, 28 usable
+**111 rows** (35 of them `public_api`); `tools/mira_data/` ships **44 fetch families, 31 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**30 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**31 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -738,6 +738,43 @@ Three measured details keep the relay usable:
   reconciled;
 - the basis figures are **vendor-published, not recomputed here**, so they are `reported_metric`
   rows carrying no ledger obligation, and provenance records that Mira did not derive them.
+
+**Item 6 (commodity / FX / credit): partly already covered, and the rest is now wired.** The
+honest finding first — **FRED already carries most of this gap's substance**, so the need was
+discoverability rather than a new adapter. Probed live 2026-10-03 through the existing
+`macro_fred` channel:
+
+| what | FRED series | value read |
+| --- | --- | --- |
+| US high-yield credit spread | `BAMLH0A0HYM2` | 3.24 |
+| USD/CNY | `DEXCHUS` | 6.711 |
+| WTI crude | `DCOILWTICO` | 96.16 |
+| broad dollar index | `DTWEXBGS` | 120.33 |
+| 10y-2y Treasury spread | `T10Y2Y` | 0.45 |
+
+Those series ids are now recorded in [macro-series-ids.md](../data/macro-series-ids.md), because an
+unlisted id is indistinguishable from an unsupported one. What FRED does **not** carry is the Treasury's own
+debt and average-interest statistics and the CFTC's positioning report, and those are two
+genuinely different sources rather than more series:
+
+- **`treasury_debt` / `treasury_avg_interest`** read the Treasury's own public API (keyless):
+  total public debt outstanding 40,260,641,972,390.03 for 2026-10-01, and 16 average-interest
+  rows across bills, notes, bonds, TIPS, FRNs and the Federal Financing Bank. Two contract
+  details: amounts arrive as **strings** including decimals, and `avg_interest_rates` **mixes
+  instruments**, so each security description is claimed separately rather than one "latest"
+  row. The Treasury's exchange-rate dataset is published on the same API but a live probe failed
+  at the network layer, so it is refused by name rather than guessed at.
+- **`cftc_cot`** reads the CFTC's weekly Commitments of Traders report from its Socrata endpoint
+  (keyless). Four datasets were probed and each returned rows; an initial label guess was
+  **wrong** — `6dca-aqww` serves WHEAT-SRW, so it is the *legacy* report covering commodity and
+  financial markets, not a "financial futures" report, and the labels now say what each dataset
+  actually returns.
+
+The trap worth keeping from this item: **a substring market filter is not a unique key.** `GOLD`
+matches both COMEX gold (open interest 406,456) and a Coinbase PAX-Gold perpetual (1,512), and
+the API's default ordering is alphabetical — so the minor market was being surfaced as "the"
+gold position. Rows are now ordered by report date then open interest descending, which puts the
+economically significant market first while the rest stay visible in the series.
 
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
