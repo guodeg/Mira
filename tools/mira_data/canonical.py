@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 股权质押: the relay's view of 中国结算 (CSDC) pledge data. L5 because the depository's own
+    # publication remains controlling, but the underlying statistics are official.
+    "em_share_pledge": Posture(
+        source_id="eastmoney_share_pledge_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # 中国国债收益率曲线: the sovereign curve from the interbank trading centre, the CN
     # counterpart of the US Treasury series. Official, keyless, so L2.
     "chinamoney_yield_curve": Posture(

@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**115 rows** (39 of them `public_api`); `tools/mira_data/` ships **51 fetch families, 38 usable
+**116 rows** (40 of them `public_api`); `tools/mira_data/` ships **52 fetch families, 39 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**39 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**40 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -775,6 +775,29 @@ matches both COMEX gold (open interest 406,456) and a Coinbase PAX-Gold perpetua
 the API's default ordering is alphabetical — so the minor market was being surfaced as "the"
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
+
+**股权质押: the last A-share hole, with a freshness trap as its real subject.** `share_pledge`
+(L5, relaying 中国结算's official weekly data) reads three views, all verified live 2026-10-04:
+whole market (2026-09-30: 28,064,095.49 万股 pledged across 2,211 companies, with pledged market
+value and the CSI 300 level alongside), per stock (质押比例, repurchase balance split into
+unlimited/limited, deal count, pledge market cap, industry — 1,639,892 rows) and per pledgee
+(83 institutions with three warning-state buckets).
+
+**The trap is freshness, and it is why the record reports dates so insistently.** A company that
+stops pledging simply stops appearing in the register, so its newest row is its *last*
+observation rather than a current one: 万科A's newest row is **2024-04-30** while 600519, 000001,
+002415 and 300750 are all current to 2026-09-30. Treating a stale row as current reports a
+two-year-old ratio as today's, and treating the absence as zero claims a company has no pledges
+when the register simply has nothing recent. Each record therefore carries `lastObservedDate` and
+`stalenessDays`, the claim text names its date, and a code absent from the register is a labelled
+gap that says outright not to read the absence as a zero ratio.
+
+Units are 万股/万元, consistent with the other A-share relays and **not** the raw shares/yuan the
+block-trade detail report uses. The three `WARNING_STATE_*` buckets are the vendor's own
+classification and are reported as counts with their definitions deliberately not asserted.
+
+**With this, all three A-share holes the equivalence map identified are closed**: the sovereign
+yield curve, dividends, and share pledges.
 
 **The CN sovereign curve: the Treasury equivalent, and the contract that hid behind three
 red herrings.** `cgb_yield_curve` reads 中国国债收益率曲线 from the interbank trading centre at

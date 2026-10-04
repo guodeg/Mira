@@ -114,3 +114,4 @@ cboe_volatility_api,market_price_and_trading,L2 CBOE volatility index history (V
 finra_short_interest_api,regulatory_and_exchange,L2 official US consolidated short interest,reviewed,"Regulator-published dataset, so L2; record family is ownership_short_interest."
 eastmoney_block_trade_api,market_price_and_trading,L5 relay of A-share 大宗交易 block trades,reviewed,Market-data relay class; family is market_price and the tier stays L5 because the exchanges are the controlling source.
 eastmoney_dividend_api,market_price_and_trading,L5 relay of A-share 分红送配 dividend and rights records,reviewed,Market-data relay class; family is issuer_disclosure and the tier stays L5 because the issuer's formal filing is controlling.
+eastmoney_share_pledge_api,market_price_and_trading,"L5 relay of CSDC share-pledge data (per stock, per pledgee, whole market)",reviewed,Market-data relay class; family is ownership_short_interest and the tier stays L5 because the depository is controlling.

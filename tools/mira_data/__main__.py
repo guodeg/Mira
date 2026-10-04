@@ -21,7 +21,8 @@ from .adapters import (bea, bls, cboe_volatility, cftc_cot, chinamoney_curve,
                        cninfo_disclosure,
                        csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
-                       em_block_trade, em_dividend, exchange_disclosure, exchange_futures,
+                       em_block_trade, em_dividend, em_pledge, exchange_disclosure,
+                       exchange_futures,
                        exchange_margin,
                        exchange_northbound,
                        finra_short,
@@ -47,7 +48,8 @@ _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activi
                     "executive_holdings", "lockup_schedule", "macro_fred",
                     "futures_member_rank", "futures_warehouse", "futures_basis",
                     "treasury_debt", "treasury_avg_interest", "cftc_cot",
-                    "dragon_tiger", "block_trade", "dividend", "cgb_yield_curve")
+                    "dragon_tiger", "block_trade", "dividend", "cgb_yield_curve",
+                    "share_pledge")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families that take NO symbol at all. They are not venue selectors, so they must not fall into
@@ -65,7 +67,7 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "futures_member_rank": "FUTURES",
                            "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
                            "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
-                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK", "dividend": "DIVIDEND", "cgb_yield_curve": "CGB"}
+                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK", "dividend": "DIVIDEND", "cgb_yield_curve": "CGB", "share_pledge": "PLEDGE"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -113,6 +115,8 @@ FETCHERS = {
                  em_dividend.fetch_dividends, em_dividend.ENDPOINT),
     "cgb_yield_curve": ("中国国债收益率曲线: the CN sovereign curve, one claim per tenor (L2)",
                         chinamoney_curve.fetch_yield_curve_family, chinamoney_curve.ENDPOINT),
+    "share_pledge": ("A-share 股权质押: per stock, per pledgee, or whole market (L5 relay)",
+                     em_pledge.fetch_share_pledge, em_pledge.ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -247,6 +251,10 @@ def main(argv: list[str] | None = None) -> int:
                         "MNE, GDPbyIndustry, Regional, ...)")
     f.add_argument("--frequency", default="Q", choices=("Q", "A", "M"),
                    help="macro_bea only: Q (quarterly), A (annual) or M (monthly)")
+    f.add_argument("--pledge-view", default="stock", choices=("stock", "market", "institution"),
+                   dest="pledge_view",
+                   help="share_pledge only: stock (needs a code), market (whole market), or "
+                        "institution (per pledgee)")
     f.add_argument("--view", default="detail", choices=("detail", "stats"),
                    help="block_trade only: detail (one row per print) or stats (one row per "
                         "stock per session, with the post-trade drift)")
@@ -890,6 +898,8 @@ def _do_fetch(args) -> int:
         kwargs["max_items"] = args.max_items
     elif family == "cgb_yield_curve":
         pass        # the positional symbol IS the optional tenor list
+    elif family == "share_pledge":
+        kwargs.update(view=args.pledge_view, max_items=args.max_items)
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -1012,6 +1022,12 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family == "share_pledge":
+        must_refresh_if = (
+            "the next weekly CSDC publication; a company that stops pledging stops appearing, so "
+            "the newest row can be years old - check stalenessDays rather than treating the last "
+            "observation as current"
+        )
     elif family == "cgb_yield_curve":
         must_refresh_if = (
             "the next business day's fixing; the curve is published after each session, and the "
@@ -1128,7 +1144,7 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
         return {"dataset": "debt_to_penny" if family == "treasury_debt" else "avg_interest_rates"}
     if family == "cftc_cot":
         return {"dataset": "6dca-aqww"}
-    if family in {"dragon_tiger", "block_trade", "dividend", "cgb_yield_curve"}:
+    if family in {"dragon_tiger", "block_trade", "dividend", "cgb_yield_curve", "share_pledge"}:
         return {}       # these endpoint templates carry no placeholders
     if family.startswith("ibkr_"):
         return {
