@@ -110,3 +110,4 @@ cffex_member_rank_api,regulatory_and_exchange,L2 exchange-published futures memb
 eastmoney_futures_inventory_api,market_price_and_trading,L5 aggregator relay of futures warehouse receipts,reviewed,Market-data relay class; the record family is macro_series and the tier stays L5 because the exchange stock file is not reachable.
 treasury_fiscal_api,official_macro_and_industry,L2 official US Treasury debt and interest-rate statistics,reviewed,"The publishing agency's own API, so L2; complements FRED's market prices rather than duplicating them."
 cftc_cot_api,official_macro_and_industry,L2 official CFTC weekly commitments-of-traders positioning,reviewed,"Agency-published positioning statistics, keyless and primary for its own report."
+cboe_volatility_api,market_price_and_trading,L2 CBOE volatility index history (VIX complex),reviewed,"The calculating exchange publishes the file, so L2 rather than the L5 relayed price; record family is macro_series."

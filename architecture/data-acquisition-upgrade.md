@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**111 rows** (35 of them `public_api`); `tools/mira_data/` ships **44 fetch families, 31 usable
+**112 rows** (36 of them `public_api`); `tools/mira_data/` ships **45 fetch families, 32 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**31 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**32 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -803,6 +803,49 @@ every other channel in this substrate is. Given the repo's explicit posture agai
 over-engineering, the honest move is to record the finding and leave the choice open — buying
 association data commercially, or treating article-level reads as manual, is a user call rather
 than a probing exercise.
+
+**Index data and volatility: mostly covered already, and the tier was the real gap.** Probing
+before building changed this item's shape twice.
+
+**A-share indices are already fully covered at L2** through the CSI channels — level *and*
+composition *and* valuation, not just a quote. Verified live 2026-10-04:
+
+| route | what it gives | read |
+| --- | --- | --- |
+| `index_benchmark 000300` | official level + member count | 4,357.62, 300 members |
+| `index_valuation 000300` | PE total, PE calculated, dividend yield | PE 14.34 / 16.35 |
+| `index_benchmark 000905` | CSI 500 level | 7,435.16 |
+
+**Broad and overseas benchmarks already read through `market_price`**, which reaches Yahoo's
+chart for indices exactly as it does for single names — no new adapter needed, only discovery:
+`^GSPC` 7,722.72, `^IXIC` 27,190.863, `^N225` 68,309.46, `^HSI` 23,972.29, `000300.SS` 4,357.616.
+What they do **not** provide is composition or valuation; that stays a genuine gap for
+non-Chinese indices, and the index providers license it rather than publish it.
+
+**VIX was the one real gap, and it was a tier gap rather than an availability one.** It was
+reachable through the Yahoo chart at L5, which yields a price with no provider identity and no
+route to the rest of the volatility complex. The exchange that *calculates* the index publishes
+its full history as CSV, so `cboe_volatility` now reads nine series at **L2** — verified live,
+with row counts and history depth:
+
+| series | what | rows / from | read 2026-10-02 |
+| --- | --- | --- | --- |
+| `VIX` | S&P 500 30-day implied vol | 9,287 / 1990 | 15.31 |
+| `VIX9D` | 9-day | 3,961 / 2011 | — |
+| `VIX3M` | 3-month | 4,287 | 18.01 |
+| `VIX6M` | 6-month | 4,719 | — |
+| `VVIX` | volatility of VIX | 5,118 | 87.02 |
+| `VXN` | Nasdaq-100 | 4,293 | — |
+| `RVX` | Russell 2000 | 4,284 | — |
+| `GVZ` | gold | 4,285 | — |
+| `OVX` | crude oil | 4,285 | — |
+
+Two traps, both measured: the VIX family publishes `DATE,OPEN,HIGH,LOW,CLOSE` while VVIX, GVZ and
+OVX publish **only** `DATE,<SYMBOL>` — so assuming "column 5" returns *nothing* for the
+single-column files rather than failing loudly, and the header must decide. And the dates are
+`MM/DD/YYYY`, where `03/06/2006` is a valid date either way, so reading it as day/month would
+silently shift history without ever raising. Cross-check: VIX 15.31 from the exchange's own file
+matches the independent Yahoo read of `^VIX` exactly, which is what confirms the parse.
 
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows

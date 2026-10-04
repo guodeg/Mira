@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # CBOE volatility indices: the exchange that calculates the index publishes the history
+    # file, so this is an official L2 statistic rather than the L5 relayed price.
+    "cboe_volatility": Posture(
+        source_id="cboe_volatility_api",
+        source_class="market_price_and_trading",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # The US Treasury's own public API and the CFTC's own COT endpoint: keyless official
     # statistics, so L2 fact-grade rather than a relay of the same ground.
     "treasury_fiscal": Posture(
