@@ -24,6 +24,19 @@ MIRA_CONTACT_EMAIL=you@your-domain.com
 # MIRA_HTTP_UA=Your Name you@your-domain.com
 
 # --- Optional API keys (only for keyed sources; not needed for SEC/BLS/Yahoo) -
+# Both providers issue a free key, and both are REQUIRED for their adapter: with the key
+# unset the fetch degrades to a labelled `fred_key_gap` / `bea_key_gap` rather than an
+# empty read, so a missing key can never look like "the series has no data".
+#
+# FRED carries US macro and rates series (Treasury yields, fed funds, CPI, unemployment):
+#   request a key at https://fredaccount.stlouisfed.org/apikeys
+#   usage:  mira_data fetch macro_fred DGS10
+# BEA carries the official national/industry accounts (GDP tables and components):
+#   request a key at https://apps.bea.gov/API/signup/
+#   usage:  mira_data fetch macro_bea T10101 --dataset NIPA --frequency Q --year 2024,2025,2026
+# BEA's shared "DEMO" id is deliberately NOT used as a fallback: it is not active, so it
+# would only ever produce a gap dressed up as a read.
+#
 # FRED_API_KEY=
 # BEA_API_KEY=
 

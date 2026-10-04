@@ -245,6 +245,22 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="medium",
         source_language="zh-CN", translation_basis="mira_translation",
     ),
+    # Official US macro publishers. Public-domain data, but the key identifies the caller,
+    # so the credential stays in gitignored config and never reaches a tracked file.
+    "fred_macro_series_api": dict(
+        provider="Federal Reserve Bank of St. Louis (FRED)",
+        speaker="official_statistics",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+    ),
+    "bea_data_api": dict(
+        provider="U.S. Bureau of Economic Analysis",
+        speaker="official_statistics",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+    ),
     # Shareholder-structure tables relayed by the aggregator: the numbers are the issuer's own
     # disclosed 前十名股东 / 前十名流通股东 tables, but the publisher is the relay, so the
     # speaker stays an aggregator and the issuer's filing is named as the upgrade route.

@@ -19,6 +19,29 @@ real contact, exactly as ``templates/mira-data-config.example`` documents.
 from __future__ import annotations
 
 import os
+from typing import Callable, Optional
+
+
+class ConfigGap(RuntimeError):
+    """A configuration gap that blocks a read (currently: a missing API key)."""
+
+
+# What ``require_api_key`` actually raises. ``net`` registers its ``FetchError`` here at
+# import; until then the base class stands in.
+#
+# The indirection is deliberate, and was arrived at by getting it wrong twice. ``net``
+# imports ``config``, so ``config`` cannot import ``net`` to name ``FetchError``. What
+# matters is the *raised* type: every adapter catches ``net.FetchError``, so the gap must
+# be an instance of that class. Raising the PARENT (``ConfigGap``) does not work - an
+# ``except FetchError`` does not catch its own base - which was verified rather than
+# assumed, after the MRO looked correct and the behaviour still surprised.
+_RAISE: Callable[[str], BaseException] = ConfigGap
+
+
+def bind_error_factory(factory: Callable[[str], BaseException]) -> None:
+    """Called by ``net`` at import so config gaps raise the adapter-catchable type."""
+    global _RAISE
+    _RAISE = factory
 
 CONFIG_ENV = "MIRA_DATA_CONFIG"
 DEFAULT_PATHS = [
@@ -100,6 +123,34 @@ def contact_ua() -> tuple[str, bool]:
 
 def is_contact_configured() -> bool:
     return contact_ua()[1]
+
+
+def api_key(name: str) -> Optional[str]:
+    """Resolved value of a keyed source, or ``None`` when unset.
+
+    A blank value and a commented-out line are both "not configured" — the shipped
+    ``private/mira-data.env`` template keeps ``FRED_API_KEY=`` / ``BEA_API_KEY=`` as
+    empty placeholders, and treating an empty string as a key would send a request the
+    provider rejects for the wrong reason.
+    """
+    value = (get(name) or "").strip()
+    return value or None
+
+
+def require_api_key(name: str, *, label: str) -> str:
+    """Return a configured key or raise a routable setup gap naming the exact step.
+
+    Same posture the SEC contact gate takes: the substrate refuses to call an official
+    endpoint without the credential it requires, and says how to fix it instead of
+    degrading to a silent empty read.
+    """
+    value = api_key(name)
+    if value:
+        return value
+    raise _RAISE(
+        f"{label}_key_gap: {name} is not configured, so {label} cannot be read. "
+        f"Add `{name}=<your key>` to private/mira-data.env (gitignored) - see "
+        "templates/mira-data-config.example. Both providers issue a free key.")
 
 
 def config_hint() -> str:

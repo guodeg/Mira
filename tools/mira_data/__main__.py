@@ -16,9 +16,10 @@ import sys
 from functools import partial
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bls, chinamoney_rates, cninfo_disclosure, csindex_index,
+from .adapters import (bea, bls, chinamoney_rates, cninfo_disclosure, csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
-                       exchange_disclosure, exchange_margin, exchange_northbound, futu_opend,
+                       exchange_disclosure, exchange_margin, exchange_northbound, fred,
+                       futu_opend,
                        hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
                        investor_qa, nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
 from .emit import emit_bundle
@@ -33,8 +34,10 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
                      "executive_holdings", "lockup_schedule", "lockup_change",
                      "shareholders_top10", "shareholders_free_float")
 # Families that take the announcement-window flags (--since/--until/--max-items).
+# window plus a row cap, and both map onto the provider's own parameters.
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity",
-                    "executive_holdings", "lockup_schedule")
+                    "executive_holdings", "lockup_schedule", "macro_fred",
+                    "futures_member_rank")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
@@ -42,7 +45,9 @@ _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "opt
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
 _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "macro_china": "MACRO", "macro_nbs": "NBS",
-                           "macro_region": "REGION", "northbound_turnover": "NORTHBOUND"}
+                           "macro_region": "REGION", "northbound_turnover": "NORTHBOUND",
+                           "macro_fred": "FRED", "macro_bea": "BEA",
+                           "futures_member_rank": "FUTURES"}
 
 
 def _is_a_share_family(family: str) -> bool:
@@ -58,6 +63,10 @@ FETCHERS = {
     "market_price": ("Yahoo v8 chart", yahoo_chart.fetch_market_price,
                      yahoo_chart.CHART_URL),
     "macro_series": ("BLS public data", bls.fetch_macro_series, bls.SERIES_URL),
+    "macro_fred": ("FRED official macro/rates series (keyed)", fred.fetch_macro_series,
+                   fred.OBSERVATIONS_URL),
+    "macro_bea": ("BEA official national/industry accounts (keyed)", bea.fetch_macro_dataset,
+                  bea.DATA_URL),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -182,6 +191,16 @@ def main(argv: list[str] | None = None) -> int:
                    help="investor_qa only: keep answers from the last N days")
     f.add_argument("--expiry", default=None,
                    help="option_surface only: expiry month YYYY-MM (defaults to the nearest)")
+    f.add_argument("--year", default=None,
+                   help="macro_bea only: comma-separated years, e.g. 2024,2025,2026 "
+                        "(defaults to the last 3)")
+    f.add_argument("--dataset", default="NIPA",
+                   help="macro_bea only: BEA dataset name (NIPA, NIUnderlyingDetail, "
+                        "MNE, GDPbyIndustry, Regional, ...)")
+    f.add_argument("--frequency", default="Q", choices=("Q", "A", "M"),
+                   help="macro_bea only: Q (quarterly), A (annual) or M (monthly)")
+    f.add_argument("--venue", default="SHFE", choices=("SHFE", "CZCE"),
+                   help="futures_member_rank only: which exchange publishes the variety")
     f.add_argument("--regions", default=None,
                    help="macro_region only: comma-separated region names, e.g. 北京,上海,广东")
     f.add_argument("--region-kind", default="province", choices=("province", "city"),
@@ -727,7 +746,7 @@ def _do_fetch(args) -> int:
         print(f"error: --max-items applies to the {'/'.join(_WINDOW_FAMILIES)} families, "
               f"not {family}", file=sys.stderr)
         return 2
-    if args.date and family not in {"margin_balance", "margin_market"}:
+    if args.date and family not in {"margin_balance", "margin_market", "futures_member_rank"}:
         print(f"error: --date applies to the margin_balance/margin_market families, "
               f"not {family}", file=sys.stderr)
         return 2
@@ -782,6 +801,11 @@ def _do_fetch(args) -> int:
     elif family == "macro_region":
         kwargs.update(regions=[part for part in (args.regions or "").split(",") if part.strip()]
                       or None, kind=args.region_kind)
+    elif family == "macro_fred":
+        kwargs.update(limit=args.max_items,
+                      observation_start=args.since, observation_end=args.until)
+    elif family == "macro_bea":
+        kwargs.update(year=args.year, dataset=args.dataset, frequency=args.frequency)
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -910,6 +934,12 @@ def _do_fetch(args) -> int:
             "Oct 31), or a new shareholding disclosure; the channel reads the newest period "
             "only, so the issuer's own top-ten table is the L1 cross-check before a durable "
             "ownership conclusion"
+        )
+    elif family in {"macro_fred", "macro_bea"}:
+        must_refresh_if = (
+            "the next official release or data revision; FRED returns the currently-known "
+            "vintage unless a vintage is requested, and BEA revises its accounts on its own "
+            "schedule"
         )
     else:
         must_refresh_if = ""

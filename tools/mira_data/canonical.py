@@ -395,6 +395,52 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # FRED and BEA: the official US macro publishers behind a free key. L2 fact-grade like
+    # BLS, but the credential is mandatory (see config.require_api_key), so a missing key is
+    # a labelled setup gap rather than a silent empty read.
+    "fred": Posture(
+        source_id="fred_macro_series_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="delayed",
+    ),
+    "bea": Posture(
+        source_id="bea_data_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="delayed",
+    ),
+    # Official futures exchanges publishing their own member-position rankings. The exchange
+    # is the controlling source for its own market, so this is genuine L2 - unlike the
+    # vendor's `futures.*` reads, which relay the same tables at L5.
+    "shfe_member_rank": Posture(
+        source_id="shfe_member_rank_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "czce_member_rank": Posture(
+        source_id="czce_member_rank_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # 限售股份变动情况 lifted from the periodic report body: the issuer's own table of
     # restricted-share movement (年初/解除/增加/年末 plus the 限售原因 and 解除日期), so a
     # reported metric at L1 - the same source row as the announcement index, because the

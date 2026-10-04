@@ -26,17 +26,23 @@ DEFAULT_TIMEOUT = 30
 RETRY_STATUSES = (307, 429, 500, 502, 503, 504)
 
 
-class FetchError(RuntimeError):
+class FetchError(config.ConfigGap):
     """Raised when an adapter cannot retrieve usable data.
 
     Adapters catch this and degrade the conclusion to a ``source_gap`` token
-    rather than fabricating data.
+    rather than fabricating data. It is the type ``config`` raises for a missing API key
+    (see ``config.bind_error_factory``), so those gaps land in the same handler.
     """
 
     def __init__(self, message: str, *, status: int | None = None, url: str | None = None):
         super().__init__(message)
         self.status = status
         self.url = url
+
+
+# Register the catchable type with the config layer. Without this, a missing key raises
+# the base ``ConfigGap``, which ``except FetchError`` does NOT catch.
+config.bind_error_factory(lambda message: FetchError(message))
 
 
 def get(url: str, *, headers: dict | None = None, timeout: int = DEFAULT_TIMEOUT,
@@ -112,6 +118,35 @@ def _base_headers(headers: dict | None) -> dict:
     if headers:
         hdrs.update(headers)
     return hdrs
+
+
+# Query-parameter names that carry a credential. A URL that is fine to *send* is not fine
+# to *record*: provenance and evidence-log URLs are tracked artifacts, so a key embedded in
+# one ends up committed. That happened for real — a live FRED fetch wrote `api_key=...`
+# into evidence-log.csv, caught by reading the emitted row rather than by a test.
+CREDENTIAL_PARAMS = (
+    "api_key", "apikey", "api-key", "key", "userid", "user_id", "token", "access_token",
+    "secret", "password", "pwd", "auth", "authorization", "client_secret", "subscription-key",
+)
+
+
+def redact_url(url: str, *, params: tuple[str, ...] = CREDENTIAL_PARAMS) -> str:
+    """Return ``url`` with any credential-bearing query value replaced by ``REDACTED``.
+
+    Provider-agnostic on purpose: the name is matched case-insensitively anywhere in the
+    query string, so a new adapter inherits the protection without opting in.
+    """
+    if not url or "?" not in url:
+        return url
+    head, _, query = url.partition("?")
+    lowered = {name.lower() for name in params}
+    parts = []
+    for chunk in query.split("&"):
+        if not chunk:
+            continue
+        name, sep, _value = chunk.partition("=")
+        parts.append(f"{name}{sep}REDACTED" if name.strip().lower() in lowered else chunk)
+    return head + "?" + "&".join(parts)
 
 
 class Session:
