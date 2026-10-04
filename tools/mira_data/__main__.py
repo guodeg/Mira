@@ -21,6 +21,7 @@ from .adapters import (bea, bls, cboe_volatility, cftc_cot, chinamoney_rates,
                        csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
                        exchange_disclosure, exchange_futures, exchange_margin, exchange_northbound,
+                       finra_short,
                        futures_inventory, hithink_special, treasury_fiscal,
                        fred, futu_opend,
                        hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
@@ -60,7 +61,7 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "futures_member_rank": "FUTURES",
                            "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
                            "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
-                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB"}
+                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -100,6 +101,8 @@ FETCHERS = {
                          cboe_volatility.fetch_implied_volatility, cboe_volatility.QUOTE_ENDPOINT),
     "dragon_tiger": ("龙虎榜 seat disclosure, per stock or per hot-money seat (L5 vendor relay)",
                      hithink_special.fetch_dragon_tiger, hithink_special.ENDPOINT),
+    "short_interest": ("FINRA consolidated short interest for one US symbol (L2)",
+                       finra_short.fetch_short_interest, finra_short.ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -788,7 +791,8 @@ def _do_fetch(args) -> int:
         print(f"error: --date applies to the margin_balance/margin_market/futures_member_rank "
               f"families, not {family}", file=sys.stderr)
         return 2
-    if args.days and family not in {"investor_qa", "futures_warehouse", "cftc_cot"}:
+    if args.days and family not in {"investor_qa", "futures_warehouse", "cftc_cot",
+                                    "short_interest"}:
         print(f"error: --days applies to the investor_qa family, not {family}",
               file=sys.stderr)
         return 2
@@ -865,6 +869,8 @@ def _do_fetch(args) -> int:
         kwargs.update(weeks=args.days, max_items=args.max_items)
     elif family == "dragon_tiger":
         kwargs.update(board_type=args.board_type, max_items=args.max_items)
+    elif family == "short_interest":
+        kwargs["limit"] = args.days
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -986,6 +992,12 @@ def _do_fetch(args) -> int:
             "the next periodic report body; an issuer can mark the table 适用 in one report and "
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
+        )
+    elif family == "short_interest":
+        must_refresh_if = (
+            "the next semi-monthly settlement's publication (settlement near the 15th and month "
+            "end, published several business days later), so a figure read mid-cycle is the "
+            "previous settlement rather than a current position"
         )
     elif family == "dragon_tiger":
         must_refresh_if = (

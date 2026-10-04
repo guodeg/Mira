@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # FINRA's own consolidated short interest file: the regulator publishes it, keyless, so this
+    # is L2 and corrects the gap list's "no free source" for US names.
+    "finra_short_interest": Posture(
+        source_id="finra_short_interest_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # 龙虎榜: the vendor's structured view of the exchanges' daily seat disclosure. L5 because
     # the SSE/SZSE published the same lists and remain the controlling source.
     "hithink_dragon_tiger": Posture(

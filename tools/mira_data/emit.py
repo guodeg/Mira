@@ -297,6 +297,14 @@ SOURCE_POLICY = {
         freshness_status="acceptable_for_period", confidence="high",
         source_language="en", translation_basis="not_translated",
     ),
+    "finra_short_interest_api": dict(
+        provider="FINRA (Financial Industry Regulatory Authority)",
+        speaker="official_statistics",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="en", translation_basis="not_translated",
+    ),
     "cboe_volatility_api": dict(
         provider="Cboe Global Markets (CBOE)",
         speaker="exchange",

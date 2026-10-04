@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**112 rows** (36 of them `public_api`); `tools/mira_data/` ships **47 fetch families, 34 usable
+**113 rows** (37 of them `public_api`); `tools/mira_data/` ships **48 fetch families, 35 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**34 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**35 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -775,6 +775,29 @@ matches both COMEX gold (open interest 406,456) and a Coinbase PAX-Gold perpetua
 the API's default ordering is alphabetical — so the minor market was being surfaced as "the"
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
+
+**Item 10 (short interest): the gap list was wrong, and the correction is the finding.** It
+recorded "short interest / float / days-to-cover, all markets — no free source". For US names that
+is not true: FINRA publishes its consolidated short interest file through a **keyless public API**,
+so `short_interest` now reads it at **L2** — verified live 2026-10-04 with AAPL at 128,753,092
+shares short and 3 days to cover for the 2026-09-15 settlement (prior 139,749,097). The fields
+include the current and previous short position, average daily volume, days to cover and the
+percent change.
+
+Four contract details, each of which turns into a plausible wrong answer rather than an error:
+
+- the endpoint answers **CSV, not JSON**, despite being Socrata-shaped;
+- filtering is **POST-only with a JSON body** — GET parameters are ignored, so a GET carrying a
+  symbol filter returns the *unfiltered* first page and looks like a successful filtered read;
+- `sortFields` is **rejected with HTTP 400**, and rows arrive **ascending** by settlement date, so
+  the newest settlement is the *last* row — taking the first would publish a 2020 figure as the
+  current position;
+- **one settlement date arrives per query**, limit-capped, so a market-wide sweep is a sample of
+  that batch and the record says whether it was truncated.
+
+Still genuinely absent, and worth separating from the corrected part: this is a short **position**,
+not short interest as a percent of **float** (the file carries no float), and **non-US** short
+interest has no equivalent free source.
 
 **Item 16 (龙虎榜 / 大宗交易 / 北向): the 龙虎榜 half is wired; the other two are partly dead
 upstream.** The gap list split this three ways and each part landed differently.
