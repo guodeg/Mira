@@ -60,3 +60,25 @@ Two item-6 sources are genuinely different rather than more series, and each has
 - `treasury_debt`, `treasury_avg_interest` — the Treasury's own debt-stock and average-interest
   statistics (`treasury_fiscal_api`).
 - `cftc_cot` — the CFTC's weekly Commitments of Traders positioning (`cftc_cot_api`).
+
+## NBS named series (the 产量 side of the industry gap)
+
+`macro_nbs` takes **named** series rather than indicator ids, and it already covers much of what
+the L2 gap list called "industry association 销量/装机/库存 data" — on the production (产量) side,
+from the statistical agency instead of an association. Verified live 2026-10-04, 28 monthly rows
+each:
+
+| series | what | value read (2026-08) |
+| --- | --- | --- |
+| `POWER_GENERATION` | 发电量, 亿千瓦时 | 9,437.8 |
+| `AUTO_OUTPUT` | 汽车产量, 万辆 | 269.7 |
+| `NEV_OUTPUT` | 新能源汽车产量, 万辆 | 164.7 |
+| `CRUDE_STEEL` | 粗钢产量, 万吨 | 7,461.4 |
+| `STEEL_PRODUCTS` | 钢材产量, 万吨 | 11,475.0 |
+| `NONFERROUS_OUTPUT` | 十种有色金属产量, 万吨 | 710.4 |
+| `CAPACITY_UTILIZATION` | 产能利用率, % (quarterly) | 73.0 |
+
+`mira_data nbs search <keyword>` lists the indicator ids behind these and any others (28 matches
+for 发电, 186 for 汽车, 484 for 产量), and the `macro_nbs` family is the fetch route. Check it
+before concluding an industry series is missing: the agency covers far more than the named
+shortcuts suggest, and `nbs search` is how to find the rest.

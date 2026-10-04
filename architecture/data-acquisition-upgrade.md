@@ -776,6 +776,34 @@ the API's default ordering is alphabetical — so the minor market was being sur
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
 
+**Item 7 (association sales / installation / inventory): the production half was already covered,
+and the association half is HTML-only.** Two findings, and the first shrinks the gap substantially.
+
+**The 产量 side already works through `macro_nbs`**, which takes named series — and they include
+the industry aggregates this gap was about. Verified live 2026-10-04, 28 monthly rows each:
+`POWER_GENERATION` 9,437.8 亿kWh, `AUTO_OUTPUT` 269.7 万辆, `NEV_OUTPUT` 164.7 万辆,
+`CRUDE_STEEL` 7,461.4 万吨, `STEEL_PRODUCTS` 11,475.0 万吨, `NONFERROUS_OUTPUT` 710.4 万吨, and
+`CAPACITY_UTILIZATION` 73.0% (quarterly). They are listed in
+[macro-series-ids.md](../data/macro-series-ids.md), because a named shortcut nobody knows about is
+indistinguishable from a missing series — and `mira_data nbs search <keyword>` reaches the rest
+(28 matches for 发电, 186 for 汽车, 484 for 产量).
+
+**The association half is not adapter-shaped, and that is a measured finding rather than an
+omission.** Each candidate was probed for a *structured* endpoint rather than a page: CAAM (中汽协)
+is a jQuery site serving articles, with no JSON or API reference anywhere (its data page mentions
+`ajax` but exposes no endpoint); CNESA's only `/api/` routes are `/api/member/_permission/` and
+`/api/right/_calendar/` — membership and calendar, not statistics; the National Energy
+Administration's data pages return 3.5 KB stubs with no data files; CPCA (乘联会) answers HTTP 403
+to a scripted client; and CPIA fails at the TLS layer. The 销量/装机/库存 figures therefore exist,
+but only inside HTML articles at publication-specific paths.
+
+That leaves a decision rather than a build. An adapter here would be a per-publication HTML scraper
+with no stable contract: it breaks whenever a site is redesigned and cannot be validated the way
+every other channel in this substrate is. Given the repo's explicit posture against
+over-engineering, the honest move is to record the finding and leave the choice open — buying
+association data commercially, or treating article-level reads as manual, is a user call rather
+than a probing exercise.
+
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
 route through aggregators and would land at L5 if built, and northbound **net flow is dead
