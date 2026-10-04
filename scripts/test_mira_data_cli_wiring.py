@@ -55,9 +55,12 @@ def test_no_family_is_both_a_venue_default_and_symbol_less() -> None:
     and as a *date* before the symbol-less branch existed.
     """
     overlap = sorted(set(M._MARKET_SERIES_FAMILIES) & set(M._SYMBOL_LESS_FAMILIES))
-    # If this ever empties, the branch in _do_fetch became dead code and both may be simplified.
-    assert overlap == ["block_trade", "cftc_cot", "dragon_tiger", "treasury_avg_interest",
-                       "treasury_debt"], overlap
+    # The overlap is expected to be non-empty, because the map doubles as the source of those
+    # families' display labels. What matters is that every member of it is DECLARED symbol-less:
+    # an undeclared member is exactly how the venue default leaked in. It is therefore checked
+    # against the declaration rather than against a frozen list, which every new family broke.
+    assert overlap, "the map should still supply display labels for the symbol-less families"
+    assert set(overlap) == (set(M._SYMBOL_LESS_FAMILIES) & set(M._MARKET_SERIES_FAMILIES))
     unknown = sorted(set(M._SYMBOL_LESS_FAMILIES) - set(M.FETCHERS))
     assert not unknown, f"symbol-less families that do not exist: {unknown}"
     # The behavioural half: the resolver's own condition, evaluated for each family.

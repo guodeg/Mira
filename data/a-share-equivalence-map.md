@@ -7,7 +7,7 @@ Mira 的原始形态是美股研究协议，数据层最初的锚点是 SEC / FR
 [source-registry.csv](source-registry.csv)，每个 family 的用法见
 `architecture/data-acquisition-upgrade.md`。
 
-**先说结论：A 股侧本来就更厚。** 当前 50 个 fetch family 里，中国源覆盖
+**先说结论：A 股侧本来就更厚。** 当前 51 个 fetch family 里，中国源覆盖
 `cninfo / sse / szse / 上证e互动 / csindex / chinamoney / nbs / eastmoney / hithink / shfe / czce / cffex`，
 美国源只有 `sec / fred / bea / treasury / cftc / finra / cboe / bls / yahoo`。所以本地化的重点
 **不是补数量，而是补齐三个真正的空档**（国债收益率曲线、分红除权、股东质押），并把美股专属通道
@@ -47,15 +47,24 @@ Mira 的原始形态是美股研究协议，数据层最初的锚点是 SEC / FR
 
 ## 2. 三个真正的 A 股空档
 
-### 2a. 国债收益率曲线 ❌ 未有可用契约
+### 2a. 国债收益率曲线 ✅ 已接入（2026-10-04）
 
-美国侧由 `treasury_debt` / `treasury_avg_interest` 覆盖；A 股侧**还没有等价通道**。
+`cgb_yield_curve`（`chinamoney_rates_api`，L2）。这是美股 `treasury_*` 的 CN 对应物：主权贴现曲线，
+也是 A 股风险溢价（尤其股权风险溢价）的定价基准。实测 2026-09-30 曲线 **50 个期限点**，
+0.083 年 1.0150% → 46 年，其中 **10Y 1.6830%、30Y 2.0990%**；窗口内共 972 行。
 
-候选端点 `chinamoney .../cm-u-bk-currency/ClsYldCurvHis` 已被确认存在——它对
-`bondType=CYCC000` 有响应并回显 `firstBondType: "CYCC000"`，说明曲线代码是对的——
-**但任何参数组合都返回 `records: []` / `total: 0`**（已试 lang/startDate/endDate、
-bondType、pageNo/pageSize、pageNum 各种拼法）。所以这是"端点已定位、契约未破解"，
-不是"源不存在"。**不要猜一个 URL 上去**，下一步应该去读 chinamoney 曲线页真实发出的请求。
+**契约是靠读页面真实请求破解的，不是猜出来的——三处每一处都表现为"源里没有数据"：**
+
+1. **`bondType` 必须是 `CYCC000`。** 我读到的那份资料把 国债 标为 `CYCC001`，而它和邻近代码
+   都返回空结果。
+2. **`reference=1,2,3` 与 `termId` 是必填的。** 缺了它们响应是 `records: []` 且
+   `data: None`——除非你知道内情，否则这和"没有数据"无法区分。
+3. **`pageSize` 上限在 50 与 200 之间**：`1000`/`500`/`200` 一律 **HTTP 403**，所以"一次要全部"
+   是被拒绝而不是被截断。`pageSize=50` 可用，而且恰好第 1 页就是一整条曲线（50 行）。
+
+窗口**上限一个月**，超出会返回官方提示 `只提供一个月历史数据查询`；adapter 把它作为带原因的
+gap 报出，而不是当成空序列。默认只对 12 个基准期限出 claim（全 50 点会让曲线形状淹没在噪声里），
+**完整曲线始终进 series**。
 
 ### 2b. 分红 / 除权除息 ✅ 已接入（2026-10-04）
 

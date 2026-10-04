@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 中国国债收益率曲线: the sovereign curve from the interbank trading centre, the CN
+    # counterpart of the US Treasury series. Official, keyless, so L2.
+    "chinamoney_yield_curve": Posture(
+        source_id="chinamoney_rates_api",
+        source_class="official_macro_and_industry",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # 分红送配: the relay's view of the issuer's own dividend declaration. L5 because the
     # issuer's formal disclosure (cninfo/exchange) remains the controlling source.
     "em_dividend": Posture(

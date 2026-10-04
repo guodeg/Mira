@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**113 rows** (37 of them `public_api`); `tools/mira_data/` ships **48 fetch families, 35 usable
+**115 rows** (39 of them `public_api`); `tools/mira_data/` ships **51 fetch families, 38 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**35 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**39 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -775,6 +775,29 @@ matches both COMEX gold (open interest 406,456) and a Coinbase PAX-Gold perpetua
 the API's default ordering is alphabetical — so the minor market was being surfaced as "the"
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
+
+**The CN sovereign curve: the Treasury equivalent, and the contract that hid behind three
+red herrings.** `cgb_yield_curve` reads 中国国债收益率曲线 from the interbank trading centre at
+**L2** — keyless, official, and the sovereign discount curve that prices A-share risk premia, so
+it is the CN counterpart of the US Treasury channel rather than another market price. Verified
+live 2026-10-04: the 2026-09-30 curve, **50 tenors** from 0.083y (1.0150%) to 46y, with **10Y
+1.6830%** and 30Y 2.0990%; 972 rows in the window.
+
+Cracking it took several probes, and **every failure presented as "the source has no data"**
+rather than as a rejected query — which is why each is now pinned by test:
+
+- **`bondType` must be `CYCC000`.** `CYCC001`, the value the port I read had labelled 国债, returns
+  an empty result, as do its neighbours.
+- **`reference=1,2,3` and `termId` are required.** Without them the response is `records: []` with
+  `data: None`.
+- **`pageSize` is capped between 50 and 200** — `1000`, `500` and `200` each answer **HTTP 403**,
+  so "ask for everything" is refused rather than truncated. `pageSize=50` is accepted and page 1
+  happens to hold one session's complete curve.
+- The window is **capped at one month**; a wider range returns the vendor's own
+  `只提供一个月历史数据查询`, surfaced as a labelled gap.
+
+Twelve benchmark tenors become claims and the **full 50-point curve always travels in the series**,
+because emitting every point as a claim buries the curve's shape in noise.
 
 **Item 10 (short interest): the gap list was wrong, and the correction is the finding.** It
 recorded "short interest / float / days-to-cover, all markets — no free source". For US names that

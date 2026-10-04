@@ -16,7 +16,8 @@ import sys
 from functools import partial
 
 from . import config, fundamentals, net, screening, technical
-from .adapters import (bea, bls, cboe_volatility, cftc_cot, chinamoney_rates,
+from .adapters import (bea, bls, cboe_volatility, cftc_cot, chinamoney_curve,
+                       chinamoney_rates,
                        cninfo_disclosure,
                        csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
@@ -46,14 +47,14 @@ _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activi
                     "executive_holdings", "lockup_schedule", "macro_fred",
                     "futures_member_rank", "futures_warehouse", "futures_basis",
                     "treasury_debt", "treasury_avg_interest", "cftc_cot",
-                    "dragon_tiger", "block_trade", "dividend")
+                    "dragon_tiger", "block_trade", "dividend", "cgb_yield_curve")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families that take NO symbol at all. They are not venue selectors, so they must not fall into
 # the "BOTH" default above - that default is a venue choice, and passing it as a symbol made
 # `treasury_debt` receive the literal string "BOTH" as its dataset.
 _SYMBOL_LESS_FAMILIES = ("treasury_debt", "treasury_avg_interest", "cftc_cot",
-                         "dragon_tiger", "block_trade")
+                         "dragon_tiger", "block_trade", "dividend", "cgb_yield_curve")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
@@ -64,7 +65,7 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "futures_member_rank": "FUTURES",
                            "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
                            "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
-                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK", "dividend": "DIVIDEND"}
+                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK", "dividend": "DIVIDEND", "cgb_yield_curve": "CGB"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -110,6 +111,8 @@ FETCHERS = {
                     em_block_trade.fetch_block_trades, em_block_trade.ENDPOINT),
     "dividend": ("A-share 分红送配: 分红方案/每股派息/股息率/除权除息日 (L5 relay)",
                  em_dividend.fetch_dividends, em_dividend.ENDPOINT),
+    "cgb_yield_curve": ("中国国债收益率曲线: the CN sovereign curve, one claim per tenor (L2)",
+                        chinamoney_curve.fetch_yield_curve_family, chinamoney_curve.ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -885,6 +888,8 @@ def _do_fetch(args) -> int:
         kwargs.update(date=args.date, view=args.view, max_items=args.max_items)
     elif family == "dividend":
         kwargs["max_items"] = args.max_items
+    elif family == "cgb_yield_curve":
+        pass        # the positional symbol IS the optional tenor list
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -1007,6 +1012,12 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family == "cgb_yield_curve":
+        must_refresh_if = (
+            "the next business day's fixing; the curve is published after each session, and the "
+            "vendor serves at most one month of history per request, so a longer lookback needs "
+            "repeated calls rather than one wide window"
+        )
     elif family == "dividend":
         must_refresh_if = (
             "the next 分红送配 announcement; the plan text, the record date and the ex-date are "
@@ -1117,7 +1128,7 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
         return {"dataset": "debt_to_penny" if family == "treasury_debt" else "avg_interest_rates"}
     if family == "cftc_cot":
         return {"dataset": "6dca-aqww"}
-    if family in {"dragon_tiger", "block_trade", "dividend"}:
+    if family in {"dragon_tiger", "block_trade", "dividend", "cgb_yield_curve"}:
         return {}       # these endpoint templates carry no placeholders
     if family.startswith("ibkr_"):
         return {
