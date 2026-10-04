@@ -441,6 +441,38 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    "cffex_member_rank": Posture(
+        source_id="cffex_member_rank_api",
+        source_class="regulatory_and_exchange",
+        authority_level="L2",
+        claim_type="fact",
+        evidence_category="verified_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    # Futures warehouse receipts and basis: aggregator tier, and labelled as such because the
+    # exchange stock files are unreachable (see futures_inventory's module docstring).
+    "em_futures_inventory": Posture(
+        source_id="eastmoney_futures_inventory_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
+    "hithink_futures_basis": Posture(
+        source_id="hithink_finance_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="delayed",
+    ),
     # 限售股份变动情况 lifted from the periodic report body: the issuer's own table of
     # restricted-share movement (年初/解除/增加/年末 plus the 限售原因 and 解除日期), so a
     # reported metric at L1 - the same source row as the announcement index, because the

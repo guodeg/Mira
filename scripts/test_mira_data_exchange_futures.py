@@ -156,9 +156,15 @@ def test_venue_and_family_contract() -> None:
     except net.FetchError as exc:
         message = str(exc)
         assert "futures_venue_gap" in message
-        # The refusal names what was tried, so the next person does not repeat it.
-        for venue in ("DCE", "CFFEX", "GFEX"):
-            assert venue in message, (venue, message)
+        # The refusal names what was tried AND the measured reason, so the next person does
+        # not repeat the probe. CFFEX is wired now: it appears in the "reads" list and must
+        # NOT appear among the unreachable ones.
+        reads, _, reason = message.partition("Not reachable")
+        assert "SHFE/CZCE/CFFEX" in reads, reads
+        for unwired in ("DCE", "GFEX"):
+            assert unwired in reason, (unwired, reason)
+        assert "CFFEX" not in reason, reason
+        assert "HTTP 412" in reason and "HTTP 520" in reason
     else:
         raise AssertionError("an unwired venue must be refused, not silently redirected")
 
@@ -184,6 +190,67 @@ def test_rank_limit_is_bounded() -> None:
     print("ok the rank cap holds and the small parsers behave")
 
 
+
+# CFFEX sj/ccpm CSV: two header rows, then one row per rank. GBK on the wire; the members
+# differ per side, which is why each side keeps its own name.
+CFFEX_TEXT = """交易日,合约,排名,成交量排名,,,持买单量排名,,,持卖单量排名,,
+,,,会员简称,成交量,比上一交易日增减,会员简称,持买单量,比上一交易日增减,会员简称,持卖单量,比上一交易日增减
+20260930,IF2610,1,中信期货(代客),7774,-2296,国泰君安(代客),8546,117,中信期货(代客),6746,247
+20260930,IF2610,2,国泰君安(代客),6593,-267,中信期货(代客),7463,-131,中金财富(代客),6440,7
+20260930,IF2610,3,东证期货(代客),3133,-683,海通期货(代客),3210,153,国泰君安(代客),5573,-290
+"""
+
+CFFEX_HTML = "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\">\n<html></html>"
+
+
+def _fetch_cffex(text=None, **kwargs):
+    body = (CFFEX_TEXT if text is None else text).encode("gbk")
+    with mock.patch.object(ef.net, "get", return_value=body):
+        return ef.fetch_member_rankings("IF", venue="CFFEX", date="2026-09-30",
+                                        as_of="2026-10-03", **kwargs)
+
+
+def test_cffex_parses_the_two_header_rows_and_keeps_sides_apart() -> None:
+    result = _fetch_cffex()
+    assert len(result.records) == 3, len(result.records)
+    first = result.records[0]
+    assert first.research_object == "IF2610" and first.value == 1.0
+    # The three sides name different members; collapsing them would misattribute the books.
+    assert first.provenance["volumeMember"] == "中信期货(代客)"
+    assert first.provenance["longMember"] == "国泰君安(代客)"
+    assert first.provenance["shortMember"] == "中信期货(代客)"
+    assert first.provenance["volume"] == 7774
+    assert first.provenance["volumeChange"] == -2296
+    assert first.provenance["longPositions"] == 8546 and first.provenance["shortPositions"] == 6746
+    assert "手" in first.claim_text and "第1名" in first.claim_text
+    assert first.posture.source_id == "cffex_member_rank_api"
+    assert first.posture.authority_level == "L2"
+    print("ok CFFEX skips both header rows and keeps the three sides apart")
+
+
+def test_cffex_html_error_page_is_a_gap_not_a_parse_failure() -> None:
+    # A wrong filename and a missing Referer both return this 2 KB page; treating it as an
+    # empty CSV would report "no rows" and hide the real cause.
+    with mock.patch.object(ef.net, "get", return_value=CFFEX_HTML.encode("gbk")):
+        try:
+            ef.fetch_member_rankings("IF", venue="CFFEX", date="2026-09-30", as_of="2026-10-03")
+        except net.FetchError as exc:
+            assert "futures_source_gap" in str(exc)
+        else:
+            raise AssertionError("an HTML error page must not read as an empty ranking")
+    print("ok a CFFEX HTML error page surfaces as a gap")
+
+
+def test_cffex_uses_the_variety_filename_without_the_contract_suffix() -> None:
+    with mock.patch.object(ef.net, "get", return_value=CFFEX_TEXT.encode("gbk")) as getter:
+        ef.fetch_member_rankings("IF", venue="CFFEX", date="2026-09-30", as_of="2026-10-03")
+    url = getter.call_args[0][0]
+    assert url.endswith("/202609/30/IF_1.csv"), url
+    headers = getter.call_args[1].get("headers") or {}
+    assert headers.get("Referer", "").startswith("http://www.cffex.com.cn"), headers
+    print("ok CFFEX uses {VARIETY}_1.csv and sends the Referer the host gates on")
+
+
 def main() -> int:
     test_shfe_matches_the_variety_exactly()
     test_shfe_keeps_the_three_sides_separate_and_parses_thousands()
@@ -191,6 +258,9 @@ def main() -> int:
     test_a_missing_session_walks_back_and_records_both_dates()
     test_venue_and_family_contract()
     test_rank_limit_is_bounded()
+    test_cffex_parses_the_two_header_rows_and_keeps_sides_apart()
+    test_cffex_html_error_page_is_a_gap_not_a_parse_failure()
+    test_cffex_uses_the_variety_filename_without_the_contract_suffix()
     print("mira_data_exchange_futures_tests: pass")
     return 0
 

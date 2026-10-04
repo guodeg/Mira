@@ -34,7 +34,16 @@ from ..canonical import POSTURES, CanonicalRecord, FetchResult
 SHFE_PM_URL = "https://www.shfe.com.cn/data/tradedata/future/dailydata/pm{date}.dat"
 CZCE_HOLDING_URL = ("http://www.czce.com.cn/cn/DFSStaticFiles/Future/{year}/{date}/"
                     "FutureDataHolding.txt")
+# CFFEX publishes one CSV per variety per session. The filename is `{VARIETY}_1.csv` — NOT
+# `{VARIETY}{YYMM}_1.csv`, which only ever returns the generic error page.
+CFFEX_RANK_URL = "http://www.cffex.com.cn/sj/ccpm/{yyyymm}/{dd}/{variety}_1.csv"
+CFFEX_VENUE_URL = "http://www.cffex.com.cn/sj/ccpm/{yyyymm}/{dd}/{variety}_1.csv"
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+# CFFEX serves GBK and gates on a Referer; both were needed to get past its error page.
+CFFEX_HEADERS = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+                 "Referer": "http://www.cffex.com.cn/"}
+VENUES = ("SHFE", "CZCE", "CFFEX")
 MAX_BACKFILL_DAYS = 10          # a session may not have published yet when asked
 DEFAULT_RANK_LIMIT = 20         # exchanges publish top-20 per table
 
@@ -73,19 +82,23 @@ def fetch_member_rankings(
     venue = (venue or "SHFE").strip().upper()
     limit = max(1, min(20, int(rank_limit or _setting("MIRA_FUTURES_RANK_LIMIT",
                                                       DEFAULT_RANK_LIMIT))))
-    if venue not in {"SHFE", "CZCE"}:
+    if venue not in VENUES:
         raise net.FetchError(
-            f"futures_venue_gap: {venue!r} is not wired; this adapter reads SHFE and CZCE "
-            "member rankings (DCE answers HTTP 412 to a scripted client, CFFEX serves HTML "
-            "where a CSV is expected, and GFEX answered HTTP 520 when probed)")
+            f"futures_venue_gap: {venue!r} is not wired; this adapter reads "
+            f"{'/'.join(VENUES)} member rankings. Not reachable, with the reason measured "
+            "2026-10-03 rather than assumed: DCE answers HTTP 412 to a scripted client and "
+            "resets the connection on its portal export, and GFEX answered HTTP 520 on its "
+            "position interface (and its whole site was unreachable at times)")
 
     errors: list[str] = []
     for candidate in _session_dates(date, as_of, MAX_BACKFILL_DAYS):
         try:
             if venue == "SHFE":
                 records = _shfe_records(variety, candidate, limit, as_of, market_scope, date)
-            else:
+            elif venue == "CZCE":
                 records = _czce_records(variety, candidate, limit, as_of, market_scope, date)
+            else:
+                records = _cffex_records(variety, candidate, limit, as_of, market_scope, date)
         except net.FetchError as exc:
             errors.append(f"{candidate}: {exc}")
             continue
@@ -221,6 +234,69 @@ def _czce_records(variety, session, limit, as_of, market_scope, requested) -> li
                 "sideBySideNote": ("the three ranked tables (volume / long / short) are "
                                    "published in one row and the members may differ per "
                                    "table, so each side keeps its own member name"),
+            },
+        ))
+    return records
+
+
+def _cffex_records(variety, session, limit, as_of, market_scope, requested) -> list:
+    """CFFEX's ranking CSV: a two-line header over one row per rank.
+
+    Layout verified live 2026-10-03 (IF_1.csv, 82 lines)::
+
+        交易日,合约,排名,成交量排名,,,持买单量排名,,,持卖单量排名,,
+        ,,,会员简称,成交量,比上一交易日增减,会员简称,持买单量,比上一交易日增减,会员简称,持卖单量,比上一交易日增减
+        20260930,IF2610,1,中信期货(代客),7774,-2296,国泰君安(代客),8546,117,中信期货(代客),6746,247
+
+    The three sides sit side by side and their members differ, so each side keeps its own
+    member name. The file is **GBK** and the host gates on a `Referer`; without the Referer
+    it answers with the same 2 KB error page it returns for a non-existent path, which is why
+    a wrong filename looks like a parse failure rather than a 404.
+    """
+    day = session.replace("-", "")
+    url = CFFEX_RANK_URL.format(yyyymm=day[:6], dd=day[6:], variety=variety.strip().upper())
+    raw = net.get(url, headers=CFFEX_HEADERS, retries=1, backoff=1.0)
+    text = raw.decode("gbk", "replace")
+    if "<!DOCTYPE" in text[:200] or "<html" in text[:200].lower():
+        raise net.FetchError(
+            "cffex returned an HTML page where a CSV was expected (the host gates on "
+            "Referer and on the exact filename)")
+    posture = POSTURES["cffex_member_rank"]
+    records = []
+    for line in text.splitlines()[2:]:        # skip the two header rows
+        cells = [c.strip() for c in line.split(",")]
+        if len(cells) < 12:
+            continue
+        try:
+            rank = int(cells[2])
+        except ValueError:
+            continue
+        if rank < 1 or rank > limit:
+            continue
+        instrument = cells[1]
+        records.append(CanonicalRecord(
+            family="ownership_short_interest", research_object=instrument.upper(),
+            market_scope=market_scope, metric="member_rank", value=float(rank),
+            unit="rank", period=session, period_type="point_in_time", as_of_date=as_of,
+            source_date=session, posture=posture, url_or_path=url,
+            claim_text=(f"CFFEX {session} {instrument} 第{rank}名 成交量 {cells[3]} "
+                        f"{_fmt(_num_cn(cells[4]))} 手（{_fmt(_num_cn(cells[5]))}），"
+                        f"持买单量 {cells[6]} {_fmt(_num_cn(cells[7]))}，"
+                        f"持卖单量 {cells[9]} {_fmt(_num_cn(cells[10]))}"),
+            provenance={
+                "venue": "CFFEX", "variety": variety.strip().upper(), "instrument": instrument,
+                "rank": rank,
+                "volumeMember": cells[3], "volume": _num_cn(cells[4]),
+                "volumeChange": _num_cn(cells[5]),
+                "longMember": cells[6], "longPositions": _num_cn(cells[7]),
+                "longChange": _num_cn(cells[8]),
+                "shortMember": cells[9], "shortPositions": _num_cn(cells[10]),
+                "shortChange": _num_cn(cells[11]),
+                "requestedDate": requested or session, "usedDate": session,
+                "units": "lots (手)",
+                "sideBySideNote": ("the three ranked tables are published in one row and the "
+                                   "members differ per side, so each side keeps its own name"),
+                "encodingNote": "CFFEX serves GBK; the host gates on a Referer",
             },
         ))
     return records

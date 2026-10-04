@@ -261,6 +261,33 @@ SOURCE_POLICY = {
         redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
         freshness_status="acceptable_for_period", confidence="high",
     ),
+    # Official futures exchanges publishing their own member position rankings. Public-domain
+    # official statistics in Chinese, so the language columns are set - without an entry here a
+    # row falls back to the default policy, which claims no language and would mistag the text.
+    "shfe_member_rank_api": dict(
+        provider="Shanghai Futures Exchange (上海期货交易所)",
+        speaker="exchange",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    "czce_member_rank_api": dict(
+        provider="Zhengzhou Commodity Exchange (郑州商品交易所)",
+        speaker="exchange",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
+    "cffex_member_rank_api": dict(
+        provider="China Financial Futures Exchange (中国金融期货交易所)",
+        speaker="exchange",
+        license_scope="public_domain_official", storage_scope="tracked_allowed",
+        redistribution_allowed="yes", readiness_impact="supports_durable_conclusion",
+        freshness_status="acceptable_for_period", confidence="high",
+        source_language="zh-CN", translation_basis="mira_translation",
+    ),
     # Shareholder-structure tables relayed by the aggregator: the numbers are the issuer's own
     # disclosed 前十名股东 / 前十名流通股东 tables, but the publisher is the relay, so the
     # speaker stays an aggregator and the issuer's filing is named as the upgrade route.

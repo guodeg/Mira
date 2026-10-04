@@ -19,6 +19,7 @@ from . import config, fundamentals, net, screening, technical
 from .adapters import (bea, bls, chinamoney_rates, cninfo_disclosure, csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
                        exchange_disclosure, exchange_futures, exchange_margin, exchange_northbound,
+                       futures_inventory,
                        fred, futu_opend,
                        hithink_finance, hithink_options, hithink_valuation, ibkr_gateway,
                        investor_qa, nbs_stats, news_pointers, sec_companyfacts, yahoo_chart)
@@ -38,7 +39,7 @@ _A_SHARE_FAMILIES = ("consensus_estimate", "margin_balance", "margin_market",
 # window plus a row cap, and both map onto the provider's own parameters.
 _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activity",
                     "executive_holdings", "lockup_schedule", "macro_fred",
-                    "futures_member_rank")
+                    "futures_member_rank", "futures_warehouse", "futures_basis")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
@@ -48,7 +49,8 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "macro_china": "MACRO", "macro_nbs": "NBS",
                            "macro_region": "REGION", "northbound_turnover": "NORTHBOUND",
                            "macro_fred": "FRED", "macro_bea": "BEA",
-                           "futures_member_rank": "FUTURES"}
+                           "futures_member_rank": "FUTURES",
+                           "futures_warehouse": "FUTURES", "futures_basis": "FUTURES"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -67,9 +69,14 @@ FETCHERS = {
                    fred.OBSERVATIONS_URL),
     "macro_bea": ("BEA official national/industry accounts (keyed)", bea.fetch_macro_dataset,
                   bea.DATA_URL),
-    "futures_member_rank": ("Exchange-published futures member rankings, SHFE or CZCE (L2)",
+    "futures_member_rank": ("Exchange-published futures member rankings: SHFE / CZCE / CFFEX (L2)",
                             exchange_futures.fetch_member_rankings,
                             exchange_futures.SHFE_PM_URL),
+    "futures_warehouse": ("Futures registered warehouse receipts (仓单), relayed (L5)",
+                          futures_inventory.fetch_warehouse_receipts,
+                          futures_inventory.EM_ENDPOINT),
+    "futures_basis": ("Futures main-continuous basis: spot vs close/settle (L5 vendor)",
+                      futures_inventory.fetch_basis, futures_inventory.BASIS_ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -204,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                         "MNE, GDPbyIndustry, Regional, ...)")
     f.add_argument("--frequency", default="Q", choices=("Q", "A", "M"),
                    help="macro_bea only: Q (quarterly), A (annual) or M (monthly)")
-    f.add_argument("--venue", default="SHFE", choices=("SHFE", "CZCE"),
+    f.add_argument("--venue", default="SHFE", choices=("SHFE", "CZCE", "CFFEX"),
                    help="futures_member_rank only: which exchange publishes the variety")
     f.add_argument("--region-kind", default="province", choices=("province", "city"),
                    help="macro_region only: province (31) or major-city (71) catalog")
@@ -753,7 +760,7 @@ def _do_fetch(args) -> int:
         print(f"error: --date applies to the margin_balance/margin_market/futures_member_rank "
               f"families, not {family}", file=sys.stderr)
         return 2
-    if args.days and family != "investor_qa":
+    if args.days and family not in {"investor_qa", "futures_warehouse"}:
         print(f"error: --days applies to the investor_qa family, not {family}",
               file=sys.stderr)
         return 2
@@ -811,6 +818,10 @@ def _do_fetch(args) -> int:
         kwargs.update(year=args.year, dataset=args.dataset, frequency=args.frequency)
     elif family == "futures_member_rank":
         kwargs.update(venue=args.venue, date=args.date, rank_limit=args.max_items)
+    elif family == "futures_warehouse":
+        kwargs.update(days=args.days, max_items=args.max_items)
+    elif family == "futures_basis":
+        kwargs["max_items"] = args.max_items
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -933,6 +944,12 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family in {"futures_warehouse", "futures_basis"}:
+        must_refresh_if = (
+            "the next session; both are aggregator relays, and the official stock file is not "
+            "reachable from this substrate, so cross-check against the exchange's own daily "
+            "bulletin before a durable conclusion"
+        )
     elif family == "futures_member_rank":
         must_refresh_if = (
             "the next session; the exchange publishes after the close and a session can be "
@@ -993,6 +1010,11 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
         # actual session (walking back when the requested one has not published), so the
         # manifest records the requested date and each claim records the used one.
         return {"date": "YYYYMMDD"}
+    if family == "futures_warehouse":
+        # Same shape: the template names the variety and the adapter resolves the window.
+        return {"variety": "<variety>", "date": "YYYYMMDD"}
+    if family == "futures_basis":
+        return {}       # the vendor endpoint template carries no placeholders
     return {
         "host": config.get("MIRA_IBKR_HOST", "127.0.0.1") or "127.0.0.1",
         "port": config.get("MIRA_IBKR_PORT", "7497") or "7497",

@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**107 rows** (31 of them `public_api`); `tools/mira_data/` ships **39 fetch families, 26 usable
+**109 rows** (33 of them `public_api`); `tools/mira_data/` ships **41 fetch families, 28 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**29 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**30 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -702,6 +702,42 @@ when probed. The adapter refuses an unwired venue by name and lists what was tri
 repeats the search. **Warehouse receipts (仓单) and basis are not in this channel** — SHFE's stock
 file was probed at five plausible paths and is at none of them, so it needs its own investigation
 rather than a guessed URL. The L2 gap item therefore closes only partially.
+
+**Member rankings: a third exchange wired, two proven unreachable.** CFFEX was added on the same
+channel (`--venue CFFEX`), giving eight varieties (IF/IC/IH/IM/T/TF/TS/TL) at L2. Two traps, both
+measuring rather than guessing: the filename is `{VARIETY}_1.csv` and **not** `{VARIETY}{YYMM}_1.csv`
+(the latter only ever returns the same generic 2 KB error page), and the host serves **GBK** and
+gates on a `Referer` — without either, that same error page comes back, so a wrong filename looks
+like a parse failure rather than a 404. The adapter now detects the HTML page explicitly instead of
+reading it as an empty ranking.
+
+The two remaining venues are unreachable, and the reasons are measured: **DCE** returns HTTP 412 to
+a scripted client even with a full browser header set (its homepage too), and its portal export
+resets the connection; **GFEX** returns HTTP 520 on every request shape of its position interface
+while its SPA homepage exposes no interface paths at all. This is not a local quirk — akshare has an
+open issue for the same DCE 412, and its own inventory functions reach the exchanges only through
+aggregators. Four of five venues are therefore wired; DCE and GFEX stay recorded as gaps.
+
+**Warehouse receipts and basis: implemented at the only tier that is actually reachable.** This is
+the honest version of the gap rather than a closed one. The official stock files are not obtainable:
+SHFE's `dailystock` 404s on both its hosts and several path shapes (its working daily JSON carries
+settlement prices but **no warehouse or spot fields**), CZCE publishes receipts only as an opaque
+per-session `rootfiles` PDF whose URL cannot be derived, and DCE is blocked outright. So
+`mira_data fetch futures_warehouse rb` reads the Eastmoney relay's `RPT_FUTU_STOCKDATA`
+(`ON_WARRANT_NUM`, 73 varieties) and `mira_data fetch futures_basis rb` reads the licensed vendor's
+`latest-basis`. Both are **L5 relays**, and each record says so along with the reason, so nothing
+can be upgraded to L2 by assumption.
+
+Three measured details keep the relay usable:
+
+- the relay's variety casing is **inconsistent within one result set** (`RB`/`CU` uppercase beside
+  `si`/`lc` lowercase) and an unmatched case returns an empty result rather than an error, which
+  reads exactly like "no receipts" — so both forms are tried;
+- the vendor's basis satisfies `spot - close == basis` (rb: 3260 - 3112 = 148). That identity is
+  checked per row and a mismatch is **flagged in provenance** rather than published as if it
+  reconciled;
+- the basis figures are **vendor-published, not recomputed here**, so they are `reported_metric`
+  rows carrying no ledger obligation, and provenance records that Mira did not derive them.
 
 **Deliberately absent.** No news/media channel yet, because the 11 canonical families have no
 media shape and adding one is a protocol change under review (§10). 龙虎榜 / 大宗 / 北向 flows
