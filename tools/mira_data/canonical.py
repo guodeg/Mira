@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 龙虎榜: the vendor's structured view of the exchanges' daily seat disclosure. L5 because
+    # the SSE/SZSE published the same lists and remain the controlling source.
+    "hithink_dragon_tiger": Posture(
+        source_id="hithink_finance_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free_with_key",
+        latency_class="delayed",
+    ),
     # CBOE delayed quotes carry the published 30-day implied volatility, which the history
     # files do not; still the exchange, still keyless, still L2.
     "cboe_quote": Posture(

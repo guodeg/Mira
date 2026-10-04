@@ -345,11 +345,11 @@ clean. Options / short-interest / intraday stay `source_gap` (no free source).
 ## 8d. A-share L1–L5 channels (implemented)
 
 Status note for §2: that diagnosis predates the substrate work. The registry now holds
-**112 rows** (36 of them `public_api`); `tools/mira_data/` ships **45 fetch families, 32 usable
+**112 rows** (36 of them `public_api`); `tools/mira_data/` ships **47 fetch families, 34 usable
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**32 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**34 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -775,6 +775,32 @@ matches both COMEX gold (open interest 406,456) and a Coinbase PAX-Gold perpetua
 the API's default ordering is alphabetical — so the minor market was being surfaced as "the"
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
+
+**Item 16 (龙虎榜 / 大宗交易 / 北向): the 龙虎榜 half is wired; the other two are partly dead
+upstream.** The gap list split this three ways and each part landed differently.
+
+**龙虎榜 — `dragon_tiger`, L5.** The vendor CLI's `special dragon-tiger` returns the exchanges'
+daily seat disclosure in structured form, so it is now readable per stock *or* per seat. Measured
+live 2026-10-04 for session 2026-09-30: `--board-type all` returned **79 stocks** (万科A net
+71,384,559.48, buy 688,964,756 / sell 617,580,196, with institutional net 118,171,874 and hot-money
+net 35,889,476), and `--board-type hot_money` returned **15 seats** (佛山系 buying 183,459,255),
+each nesting the stocks it traded. Tier is **L5**: the SSE and SZSE published the same lists, so
+`exchange_announcements` remains the controlling read when the question is what was *disclosed*,
+and this is the structured queryable view.
+
+Two traps, both measured. First, **the date must be an A-share trading day** and the CLI refuses
+others outright (`FUYAO_1002`) — so 2026-09-25 (a weekend) and 2026-10-02 (National Day holiday)
+both failed as *validation errors* before 2026-09-30 worked; the vendor's own `market calendar` is
+the way to pick a session, and 2026-09-30 is its last entry. Second, **an empty session is
+legitimate**: a valid session on which nothing qualified returns `ok:true` with empty lists, which
+is a different outcome from a bad date and is reported as an empty session rather than emitted as
+zero claims. A third detail: seat rows **do not sum** to the per-stock view, because one stock
+appears under several seats, and the row says so.
+
+**大宗交易 and 北向 net flow are not built, and the reasons are not the same.** Northbound
+turnover is already covered at L2 by `northbound_turnover` (SSE/SZSE published), but northbound
+**net flow is dead upstream** — the disclosure was discontinued, so no adapter can restore it.
+Block trades (大宗交易) were not reached in this pass and remain open rather than claimed.
 
 **Item 13 (US estimates / options / holders): options advanced at L2, estimates stay licensed.**
 The gap list proposed `yfinance`. Probing found a better answer for the options half and a

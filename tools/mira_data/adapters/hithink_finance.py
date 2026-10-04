@@ -194,6 +194,48 @@ def _run(args: list[str], *, timeout: Optional[float] = None) -> dict:
     return payload.get("data") or {}
 
 
+def vendor_json(cmd: list[str]) -> dict:
+    """Run one CLI command and read its JSON envelope from ``--output``.
+
+    A sibling of :func:`_run` that asks the CLI to write a **file** instead of capturing
+    stdout. Both routes exist deliberately: a pipe is the cheaper one, but an npm shim's stdout
+    is not reliably capturable through one (and a confined sandbox forbids it outright), so
+    commands that must work in either environment go through ``--output``. Error envelopes are
+    inspected the same way regardless, so a provider-side rejection never reads as a success
+    just because the process exited zero.
+    """
+    import os as _os
+
+    binary = resolve_bin()
+    out = _os.path.join(_os.environ.get("TEMP") or "/tmp", "mira-vendor-envelope.json")
+    argv = _argv(binary, [*cmd, "--format", "json", "--output", out])
+    try:
+        proc = subprocess.run(argv, capture_output=True, timeout=_timeout())
+    except FileNotFoundError as exc:
+        raise net.FetchError(f"hithink_cli_gap: could not execute {binary}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise net.FetchError(
+            f"hithink_timeout: {' '.join(cmd)} exceeded {_timeout()}s") from exc
+
+    if proc.returncode != 0 and not _os.path.exists(out):
+        raise net.FetchError(
+            f"hithink_error: {' '.join(cmd)} exited {proc.returncode} and wrote no envelope")
+    try:
+        with open(out, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise net.FetchError(
+            f"hithink_bad_output: unreadable envelope from {' '.join(cmd)}: {exc}") from exc
+    if not payload.get("ok"):
+        error = payload.get("error") or {}
+        detail = "; ".join(
+            str(part) for part in (error.get("code"), error.get("message"), error.get("hint"))
+            if part
+        ) or f"exit code {proc.returncode}"
+        raise net.FetchError(f"hithink_error: {' '.join(cmd)}: {detail}")
+    return payload.get("data") or {}
+
+
 def _parse_envelope(stdout: str, args: list[str], returncode: int) -> dict:
     text = (stdout or "").strip()
     if not text:
