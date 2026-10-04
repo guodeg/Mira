@@ -349,7 +349,7 @@ Status note for §2: that diagnosis predates the substrate work. The registry no
 with zero optional dependencies** — 8 take `futu-api` / `ib_insync` (local gateways) and 5 take
 `xlrd` (`index_members`, `index_valuation`) or `pypdf` (`shareholder_count`, `ir_activity`,
 `lockup_change`), each through a lazy import that degrades to a labelled gap; and
-**40 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
+**42 offline suites** run inside `scripts/run_quality_gate.py`. §8c documents the US channels;
 this section documents the mainland ones, which have their own traps and their own tier split.
 
 | layer | family | adapter / registered source | tier | command |
@@ -775,6 +775,63 @@ matches both COMEX gold (open interest 406,456) and a Coinbase PAX-Gold perpetua
 the API's default ordering is alphabetical — so the minor market was being surfaced as "the"
 gold position. Rows are now ordered by report date then open interest descending, which puts the
 economically significant market first while the rest stay visible in the series.
+
+**A-share screening: `screen` worked for A-shares.** Running a real analysis surfaced this as the
+last A-share hole: ``screen 600183 --min-net-margin 0.05`` answered *"no candidate could be
+evaluated"* for every A-share, because the only path read SEC companyfacts and returned
+``data_gap`` on a missing CIK before computing a single metric. Both markets are now supported,
+with the market inferred from the ticker and US behaviour untouched.
+
+Four of the five US criteria carry over, and the two that do not are handled honestly:
+
+| criterion | A-share source | note |
+| --- | --- | --- |
+| `--max-debt-to-equity` | vendor `long_term_debt_equity_ratio` | **long-term debt, NOT total liabilities** |
+| `--max-assets-debt-ratio` | vendor `assets_debt_ratio` | A-share-native (资产负债率), new criterion |
+| `--min-net-margin` | `net_profit / operating_income` | recomputed; reproduces the vendor exactly |
+| `--min-revenue-yoy` | annual rows | quarterly is cumulative, so unusable for QoQ |
+| `--min-market-cap`, `--min-fcf-yield` | **unavailable** | Partial gap, not a failure |
+
+**The leverage decision is the substance.** The balance sheet exposes a field named ``total_debt``
+that *is* total liabilities — it equals ``assets_total − holder_equity_total`` to the penny
+(600183: 13,859,467,654.75 both ways). Feeding it to a leverage ceiling would filter out
+asset-light, high-bargaining-power businesses whose liabilities are almost entirely interest-free
+payables, which is the opposite of what the criterion exists for. The vendor's
+``long_term_debt_equity_ratio`` matches the US semantic instead, and is recorded as a
+**vendor-published** value because no channel exposes borrowing line items (no short-term
+borrowings, no long-term borrowings, no bonds payable), so Mira cannot independently recompute it.
+Both leverage criteria are offered because they can disagree completely — 平安银行 reads **90.7%
+liabilities/assets with essentially zero long-term debt**, and no single criterion can express both
+facts.
+
+**An unavailable criterion is Partial, never a failure.** Hard-failing would reject every A-share on
+a criterion unavailable by construction (the original bug in a new costume); silently skipping would
+drop the user's stated intent. So the candidate is judged on the criteria that have data, the
+missing one is named in ``data_gaps``, ``screen_status`` becomes ``partial``, and the row says why.
+A partial cannot mask a real failure: a criterion that fails still fails.
+
+**Two correctness guards, both from the review:**
+
+- **A mixed batch is refused.** One numeric threshold means USD against US tickers and CNY against
+  A-shares — roughly 7x apart under a single predicate — so ``screen AAPL,600183`` errors with
+  ``cannot screen multi-currency tickers in a single batch without explicit conversion`` rather than
+  silently reinterpreting. No FX assumption is introduced anywhere.
+- **No market cap is fabricated.** No A-share channel exposes shares outstanding or market value,
+  and deriving one is demonstrably unreliable rather than merely stale: backing shares out of the
+  vendor's own ratios gives 18.20bn from ``pe_ttm`` but 14.38bn from ``pe_mrq``, because the two use
+  different earnings windows. Since ``fcf_yield`` needs that denominator, both are Partial.
+
+**Why annual rows only for YoY.** The vendor's ``--period quarterly`` income series returns
+**cumulative year-to-date** figures: 2025 reads Q1 5.61bn, Q2 12.68bn, Q3 20.61bn, Q4 28.43bn, with
+the Q4 value equal to the annual figure exactly. So its "2026-Q2" is the H1 total, and a
+quarter-on-quarter subtraction would manufacture an apparent **+134%** growth out of the
+accumulation itself. Annual rows carry no such ambiguity; the metric records "annual, not
+cumulative" in its period basis, and the CLI prints a market-specific basis note saying so.
+
+Verified live: ``screen 600183,600519,000001 --min-net-margin 0.05 --max-debt-to-equity 0.2``
+returns 3 pass (茅台 at 0.11% long-term leverage and a 50.5% net margin), and
+``--max-assets-debt-ratio 0.5`` fails 平安银行 on liabilities/assets while it passes on long-term
+debt — the two criteria disagreeing exactly where they should.
 
 **股权质押: the last A-share hole, with a freshness trap as its real subject.** `share_pledge`
 (L5, relaying 中国结算's official weekly data) reads three views, all verified live 2026-10-04:

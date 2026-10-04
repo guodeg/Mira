@@ -293,17 +293,29 @@ def main(argv: list[str] | None = None) -> int:
     sc.add_argument("tickers",
                     help="comma-separated tickers, or @file with one ticker per line "
                          f"(max {screening.MAX_TICKERS})")
-    sc.add_argument("--min-market-cap", type=float, default=None, help="USD floor")
+    sc.add_argument("--min-market-cap", type=float, default=None,
+                    help="market-cap floor. US tickers: USD. A-shares: CNY, and NOT computable "
+                         "(no channel exposes shares outstanding or total market value), so an "
+                         "A-share batch reports it as a partial gap instead of failing")
     sc.add_argument("--min-fcf-yield", type=float, default=None,
-                    help="(FY OCF - FY capex) / market cap floor, e.g. 0.04")
+                    help="(FY OCF - FY capex) / market cap floor, e.g. 0.04. Not computable for "
+                         "A-shares (it needs the same market cap), so reported as a partial gap")
     sc.add_argument("--max-debt-to-equity", type=float, default=None,
-                    help="long-term debt / equity ceiling, e.g. 1.0")
+                    help="long-term debt / equity ceiling, e.g. 1.0. For A-shares this is the "
+                         "vendor's long_term_debt_equity_ratio, NOT total liabilities")
+    sc.add_argument("--max-assets-debt-ratio", type=float, default=None,
+                    help="A-share only: 资产负债率 (total liabilities / assets) ceiling, e.g. "
+                         "0.7; the native A-share leverage convention")
     sc.add_argument("--min-net-margin", type=float, default=None, help="FY net margin floor")
     sc.add_argument("--min-revenue-yoy", type=float, default=None,
-                    help="latest same-period revenue YoY floor, e.g. 0.0")
+                    help="latest same-period revenue YoY floor, e.g. 0.0. The A-share path uses "
+                         "ANNUAL rows only, because the vendor's quarterly series is cumulative "
+                         "(its \"Q2\" is the H1 total)")
     sc.add_argument("--out", default="private/data-smoke")
     sc.add_argument("--as-of", default=None)
-    sc.add_argument("--market-scope", default="US")
+    sc.add_argument("--market-scope", default=None,
+                    help="assert the batch's market (US or CN); inferred from the tickers when "
+                         "omitted, and a mixed batch is refused")
     sc.add_argument("--no-emit", action="store_true", help="print results only, don't write files")
 
     sub.add_parser("config", help="show resolved data-substrate configuration")
@@ -432,8 +444,8 @@ def _do_fundamentals(args) -> int:
 
 
 def _do_screen(args) -> int:
-    criteria = {name: getattr(args, name) for name in screening.CRITERIA
-                if getattr(args, name) is not None}
+    criteria = {name: getattr(args, name) for name in screening.CRITERIA_CN
+                if getattr(args, name, None) is not None}
     try:
         tickers = _parse_tickers(args.tickers)
         res = screening.screen_candidates(
@@ -446,22 +458,41 @@ def _do_screen(args) -> int:
         return 1
 
     s = res.summary
-    print(f"# screen {s['as_of']}: {s['n_candidates']} candidates -> "
-          f"{s['pass']} pass / {s['fail']} fail / {s['data_gap']} data_gap")
+    print(f"# screen {s['as_of']} [{s.get('market', 'US')}]: {s['n_candidates']} candidates -> "
+          f"{s['pass']} pass / {s.get('partial', 0)} partial / {s['fail']} fail / "
+          f"{s['data_gap']} data_gap")
     print(f"  criteria: {s['criteria']}")
-    print(f"{'ticker':<12}{'status':<10}{'mkt_cap':>18}{'fcf_yld':>11}{'d/e':>11}"
-          f"{'margin':>11}{'rev_yoy':>11}  {'cash_flow_end':<14}{'yoy_basis':<26}gaps")
-    for row in res.rows:
-        print(f"{row['ticker']:<12}{row['screen_status']:<10}"
-              f"{_fmt_metric(row['market_cap_usd']):>18}{_fmt_metric(row['fcf_yield']):>11}"
-              f"{_fmt_metric(row['debt_to_equity']):>11}{_fmt_metric(row['net_margin']):>11}"
-              f"{_fmt_metric(row['revenue_yoy']):>11}  "
-              f"{row['cash_flow_period_end']:<14}{row['revenue_yoy_period']:<26}"
-              f"{row['data_gaps']}")
+    if s.get("market") == "CN":
+        # A-share rows carry 资产负债率 as well, and the leverage caveat matters when reading d/e.
+        print(f"{'ticker':<10}{'status':<10}{'d/e':>10}{'liab/assets':>13}{'margin':>10}"
+              f"{'rev_yoy':>10}  {'yoy_basis':<34}gaps")
+        for row in res.rows:
+            print(f"{row['ticker']:<10}{row['screen_status']:<10}"
+                  f"{_fmt_metric(row['debt_to_equity']):>10}"
+                  f"{_fmt_metric(row.get('assets_debt_ratio')):>13}"
+                  f"{_fmt_metric(row['net_margin']):>10}"
+                  f"{_fmt_metric(row['revenue_yoy']):>10}  "
+                  f"{row['revenue_yoy_period']:<34}{row['data_gaps']}")
+    else:
+        print(f"{'ticker':<12}{'status':<10}{'mkt_cap':>18}{'fcf_yld':>11}{'d/e':>11}"
+              f"{'margin':>11}{'rev_yoy':>11}  {'cash_flow_end':<14}{'yoy_basis':<26}gaps")
+        for row in res.rows:
+            print(f"{row['ticker']:<12}{row['screen_status']:<10}"
+                  f"{_fmt_metric(row['market_cap_usd']):>18}{_fmt_metric(row['fcf_yield']):>11}"
+                  f"{_fmt_metric(row['debt_to_equity']):>11}{_fmt_metric(row['net_margin']):>11}"
+                  f"{_fmt_metric(row['revenue_yoy']):>11}  "
+                  f"{row['cash_flow_period_end']:<14}{row['revenue_yoy_period']:<26}"
+                  f"{row['data_gaps']}")
     mixed = [r["ticker"] for r in res.rows
              if r["cash_flow_period_end"] != "source_gap"
              and r["revenue_yoy_period"] != "source_gap"]
-    if mixed:
+    if mixed and s.get("market") == "CN":
+        # A-share rows do NOT mix periods: net_margin and revenue_yoy both come from annual rows,
+        # deliberately, because the vendor's quarterly series is cumulative. Saying otherwise
+        # would warn about a trap this path already avoids.
+        print("  basis note: all A-share metrics come from ANNUAL report periods — the vendor's "
+              "quarterly series is cumulative (its \"Q2\" is the H1 total), so it is not used")
+    elif mixed:
         print("  basis note: fcf_yield/net_margin use annual fiscal periods while "
               "revenue_yoy uses a quarterly YoY — compare the two period columns "
               f"per row before ranking ({', '.join(mixed)})")
