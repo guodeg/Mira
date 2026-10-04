@@ -20,7 +20,8 @@ from .adapters import (bea, bls, cboe_volatility, cftc_cot, chinamoney_rates,
                        cninfo_disclosure,
                        csindex_index,
                        eastmoney_consensus, eastmoney_macro, em_holders, em_insider, em_lockup,
-                       exchange_disclosure, exchange_futures, exchange_margin, exchange_northbound,
+                       em_block_trade, exchange_disclosure, exchange_futures, exchange_margin,
+                       exchange_northbound,
                        finra_short,
                        futures_inventory, hithink_special, treasury_fiscal,
                        fred, futu_opend,
@@ -44,13 +45,14 @@ _WINDOW_FAMILIES = ("cninfo_announcements", "exchange_announcements", "ir_activi
                     "executive_holdings", "lockup_schedule", "macro_fred",
                     "futures_member_rank", "futures_warehouse", "futures_basis",
                     "treasury_debt", "treasury_avg_interest", "cftc_cot",
-                    "dragon_tiger")
+                    "dragon_tiger", "block_trade")
 # Market-level families whose symbol is a venue selector defaulting to both venues.
 _VENUE_FAMILIES = {"northbound_turnover": "NORTHBOUND"}
 # Families that take NO symbol at all. They are not venue selectors, so they must not fall into
 # the "BOTH" default above - that default is a venue choice, and passing it as a symbol made
 # `treasury_debt` receive the literal string "BOTH" as its dataset.
-_SYMBOL_LESS_FAMILIES = ("treasury_debt", "treasury_avg_interest", "cftc_cot", "dragon_tiger")
+_SYMBOL_LESS_FAMILIES = ("treasury_debt", "treasury_avg_interest", "cftc_cot",
+                         "dragon_tiger", "block_trade")
 # Families whose "symbol" is a security (thscode-resolvable) rather than a venue name.
 _THSCODE_FAMILIES = ("consensus_estimate", "margin_balance", "investor_qa", "option_surface")
 # Market-level families: the "symbol" selects a venue or benchmark, defaulting to both.
@@ -61,7 +63,7 @@ _MARKET_SERIES_FAMILIES = {"margin_market": "MARGIN", "macro_rates": "RATES",
                            "futures_member_rank": "FUTURES",
                            "futures_warehouse": "FUTURES", "futures_basis": "FUTURES",
                            "treasury_debt": "TREASURY", "treasury_avg_interest": "TREASURY",
-                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT"}
+                           "cftc_cot": "CFTC", "cboe_volatility": "CBOE", "cboe_implied_vol": "CBOE", "dragon_tiger": "LHB", "short_interest": "SHORT", "block_trade": "BLOCK"}
 
 def _is_a_share_family(family: str) -> bool:
     return family.startswith(_A_SHARE_PREFIXES) or family in _A_SHARE_FAMILIES
@@ -103,6 +105,8 @@ FETCHERS = {
                      hithink_special.fetch_dragon_tiger, hithink_special.ENDPOINT),
     "short_interest": ("FINRA consolidated short interest for one US symbol (L2)",
                        finra_short.fetch_short_interest, finra_short.ENDPOINT),
+    "block_trade": ("A-share 大宗交易 block trades, per print or per stock (L5 relay)",
+                    em_block_trade.fetch_block_trades, em_block_trade.ENDPOINT),
     "ibkr_market_price": ("IBKR local Gateway", ibkr_gateway.fetch_market_price,
                           ibkr_gateway.GATEWAY_ENDPOINT),
     "ibkr_positions": ("IBKR local Gateway positions", ibkr_gateway.fetch_positions,
@@ -237,6 +241,9 @@ def main(argv: list[str] | None = None) -> int:
                         "MNE, GDPbyIndustry, Regional, ...)")
     f.add_argument("--frequency", default="Q", choices=("Q", "A", "M"),
                    help="macro_bea only: Q (quarterly), A (annual) or M (monthly)")
+    f.add_argument("--view", default="detail", choices=("detail", "stats"),
+                   help="block_trade only: detail (one row per print) or stats (one row per "
+                        "stock per session, with the post-trade drift)")
     f.add_argument("--board-type", default="all",
                    choices=("all", "org", "hot_money"),
                    help="dragon_tiger only: all (per stock), org (institutional), "
@@ -787,7 +794,7 @@ def _do_fetch(args) -> int:
               f"not {family}", file=sys.stderr)
         return 2
     if args.date and family not in {"margin_balance", "margin_market", "futures_member_rank",
-                                    "dragon_tiger"}:
+                                    "dragon_tiger", "block_trade"}:
         print(f"error: --date applies to the margin_balance/margin_market/futures_member_rank "
               f"families, not {family}", file=sys.stderr)
         return 2
@@ -871,6 +878,8 @@ def _do_fetch(args) -> int:
         kwargs.update(board_type=args.board_type, max_items=args.max_items)
     elif family == "short_interest":
         kwargs["limit"] = args.days
+    elif family == "block_trade":
+        kwargs.update(date=args.date, view=args.view, max_items=args.max_items)
     elif family == "index_members":
         kwargs["with_weights"] = not args.no_weights
     try:
@@ -993,6 +1002,12 @@ def _do_fetch(args) -> int:
             "不适用 in the next, so a holder list that a filing publishes can be absent from the "
             "newest one. The issuer's own standalone 限售股上市流通公告 is the per-event cross-check"
         )
+    elif family == "block_trade":
+        must_refresh_if = (
+            "the session after the trade; block prints are published with the session's "
+            "disclosure and the stats view also carries D1/D5/D10/D20 drift figures that stay "
+            "null until each horizon elapses"
+        )
     elif family == "short_interest":
         must_refresh_if = (
             "the next semi-monthly settlement's publication (settlement near the 15th and month "
@@ -1091,12 +1106,29 @@ def _local_endpoint_params(family: str) -> dict[str, str]:
         return {"dataset": "debt_to_penny" if family == "treasury_debt" else "avg_interest_rates"}
     if family == "cftc_cot":
         return {"dataset": "6dca-aqww"}
-    if family == "dragon_tiger":
-        return {}       # the vendor endpoint template carries no placeholders
-    return {
-        "host": config.get("MIRA_IBKR_HOST", "127.0.0.1") or "127.0.0.1",
-        "port": config.get("MIRA_IBKR_PORT", "7497") or "7497",
-    }
+    if family in {"dragon_tiger", "block_trade"}:
+        return {}       # these endpoint templates carry no placeholders
+    if family.startswith("ibkr_"):
+        return {
+            "host": config.get("MIRA_IBKR_HOST", "127.0.0.1") or "127.0.0.1",
+            "port": config.get("MIRA_IBKR_PORT", "7497") or "7497",
+        }
+    # Everything else is decided by the family's endpoint template rather than by a list. The
+    # format call upstream supplies symbol/thscode/cik10/series_id itself, so a template using
+    # only those needs nothing here; a template with any OTHER placeholder must have a branch,
+    # because otherwise the format call raises a bare KeyError naming only the placeholder and
+    # not the family. Returning {} is the correct answer for the rest — returning the IBKR
+    # host/port for a non-IBKR family is wrong, and was silent: it recorded 127.0.0.1:7497 as
+    # the source host for two non-IBKR families before this guard existed.
+    template = FETCHERS.get(family, (None, None, ""))[2] or ""
+    needs_branch = set(re.findall(r"{([a-z_0-9]+)}", template)) - {
+        "symbol", "thscode", "cik10", "series_id"}
+    if not needs_branch:
+        return {}
+    raise AssertionError(
+        f"_local_endpoint_params: {family!r} has no branch but its endpoint template needs "
+        f"{sorted(needs_branch)}; add a branch, because the format call would otherwise raise a "
+        "bare KeyError that does not name the family")
 
 
 def _display_futu_symbol(symbol: str) -> str:

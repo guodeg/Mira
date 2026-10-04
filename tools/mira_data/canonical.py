@@ -451,6 +451,18 @@ POSTURES: dict[str, Posture] = {
         acquisition_mode="free",
         latency_class="delayed",
     ),
+    # 大宗交易: the relay's view of the exchanges' negotiated block prints. L5 because the
+    # exchanges published the same prints and remain controlling.
+    "em_block_trade": Posture(
+        source_id="eastmoney_block_trade_api",
+        source_class="market_price_and_trading",
+        authority_level="L5",
+        claim_type="reported_metric",
+        evidence_category="reported_fact",
+        access_method="public_api",
+        acquisition_mode="free",
+        latency_class="delayed",
+    ),
     # FINRA's own consolidated short interest file: the regulator publishes it, keyless, so this
     # is L2 and corrects the gap list's "no free source" for US names.
     "finra_short_interest": Posture(
