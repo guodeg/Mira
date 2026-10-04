@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as _dt
 from typing import Optional
 
-from .. import net
+from .. import cn_symbols, net
 from ..canonical import POSTURES, CanonicalRecord, FetchResult
 
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -27,6 +27,10 @@ def fetch_market_price(
     interval: str = "1d",
 ) -> FetchResult:
     as_of = as_of or _dt.date.today().isoformat()
+    # A bare A-share code needs its exchange suffix, and the suffix is mechanically derivable, so
+    # deriving it beats making the caller learn it. A Yahoo 404 names only the URL, which does not
+    # say "you forgot .SS". Anything that is not a bare six-digit A-share code is left untouched.
+    symbol = cn_symbols.to_yahoo_symbol(symbol)
     url = CHART_URL.format(symbol=symbol) + f"?interval={interval}&range={range_}"
     chart = net.get_json(url).get("chart", {})
     if chart.get("error"):
