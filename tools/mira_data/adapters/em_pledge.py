@@ -49,9 +49,9 @@ HEADERS = {
 VIEWS = ("market", "stock", "institution")
 MARKET_COLUMNS = ["tradeDate", "pledgedSharesWan", "pledgedMarketValueWan", "csi300",
                   "pledgingCompanies", "dailyDeals"]
-STOCK_COLUMNS = ["tradeDate", "code", "name", "pledgeRatioPercent", "repurchaseBalanceWan",
-                 "dealNum", "unlimitedBalanceWan", "limitedBalanceWan", "pledgeMarketCapWan",
-                 "industry"]
+STOCK_COLUMNS = ["tradeDate", "code", "name", "pledgeRatioPercent",
+                 "repurchaseBalanceWanShares", "dealNum", "unlimitedBalanceWanShares",
+                 "limitedBalanceWanShares", "pledgeMarketCapWan", "industry"]
 INSTITUTION_COLUMNS = ["name", "orgType", "orgNum", "dealNum", "pledgeWan",
                        "warningState1", "warningState2", "warningState3"]
 DEFAULT_LIMIT = 100
@@ -118,10 +118,10 @@ def _stock_view(rows, code, as_of, market_scope, limit) -> FetchResult:
         series_rows.append({
             "tradeDate": day, "code": str(row.get("SECURITY_CODE") or "").strip(),
             "name": row.get("SECURITY_NAME_ABBR"), "pledgeRatioPercent": ratio,
-            "repurchaseBalanceWan": _num(row.get("REPURCHASE_BALANCE")),
+            "repurchaseBalanceWanShares": _num(row.get("REPURCHASE_BALANCE")),
             "dealNum": _num(row.get("PLEDGE_DEAL_NUM")),
-            "unlimitedBalanceWan": _num(row.get("REPURCHASE_UNLIMITED_BALANCE")),
-            "limitedBalanceWan": _num(row.get("REPURCHASE_LIMITED_BALANCE")),
+            "unlimitedBalanceWanShares": _num(row.get("REPURCHASE_UNLIMITED_BALANCE")),
+            "limitedBalanceWanShares": _num(row.get("REPURCHASE_LIMITED_BALANCE")),
             "pledgeMarketCapWan": _num(row.get("PLEDGE_MARKET_CAP")),
             "industry": row.get("INDUSTRY"),
         })
@@ -136,9 +136,9 @@ def _stock_view(rows, code, as_of, market_scope, limit) -> FetchResult:
             "view": "stock", "code": code, "name": rows[0].get("SECURITY_NAME_ABBR"),
             "lastObservedDate": newest, "stalenessDays": fresh,
             "pledgeRatioPercent": _num(rows[0].get("PLEDGE_RATIO")),
-            "repurchaseBalanceWan": _num(rows[0].get("REPURCHASE_BALANCE")),
-            "unlimitedBalanceWan": _num(rows[0].get("REPURCHASE_UNLIMITED_BALANCE")),
-            "limitedBalanceWan": _num(rows[0].get("REPURCHASE_LIMITED_BALANCE")),
+            "repurchaseBalanceWanShares": _num(rows[0].get("REPURCHASE_BALANCE")),
+            "unlimitedBalanceWanShares": _num(rows[0].get("REPURCHASE_UNLIMITED_BALANCE")),
+            "limitedBalanceWanShares": _num(rows[0].get("REPURCHASE_LIMITED_BALANCE")),
             "dealNum": _num(rows[0].get("PLEDGE_DEAL_NUM")),
             "pledgeMarketCapWan": _num(rows[0].get("PLEDGE_MARKET_CAP")),
             "industry": rows[0].get("INDUSTRY"),
@@ -148,8 +148,15 @@ def _stock_view(rows, code, as_of, market_scope, limit) -> FetchResult:
                               "stalenessDays before treating it as today's position"),
             "absenceNote": ("a company absent from this report is not one with zero pledges; it "
                             "means CSDC lists no outstanding pledge for it"),
-            "unitNote": ("share counts are 万股 and money is 万元, as in the other A-share "
-                         "relays - not the raw shares/yuan the block-trade detail report uses"),
+            "unitNote": ("the BALANCE fields are pledged SHARES in 万股 while PLEDGE_MARKET_CAP "
+                         "is money in 万元 - the two are different quantities, not two "
+                         "currencies worth of the same thing"),
+            "unitBasis": ("established by arithmetic: PLEDGE_MARKET_CAP / REPURCHASE_BALANCE "
+                          "returns a per-SHARE price (000981: 2,500,317.43 / 222,448.17 = "
+                          "11.24 yuan, and 11.50 / 10.44 on adjacent dates), which only holds "
+                          "if the balance is SHARES. Reading it as 万元 would make a "
+                          "2.2-billion-share pledge look like 2.2 million yuan of money, and "
+                          "the field name says 'balance' either way"),
             "tierBasis": TIER_NOTE,
         },
     ))

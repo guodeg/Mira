@@ -113,14 +113,29 @@ def test_absence_from_the_register_is_not_a_zero() -> None:
     print("ok absence from the register is a labelled gap, not a zero ratio")
 
 
-def test_units_are_wan_and_stated() -> None:
+def test_units_distinguish_shares_from_money() -> None:
+    """The balance fields are SHARES (万股) while market cap is MONEY (万元).
+
+    Getting this wrong is silent because the vendor calls the field a "balance" either way: a
+    2.2-billion-share pledge would read as 2.2 million yuan of money. The distinction was
+    established by arithmetic — ``PLEDGE_MARKET_CAP / REPURCHASE_BALANCE`` returns a per-SHARE
+    price (000981: 2,500,317.43 / 222,448.17 = 11.24 yuan, and 11.50 / 10.44 on adjacent dates),
+    which only holds if the balance is shares. Both the field names and a recorded unitBasis
+    carry that, so the reading cannot be lost.
+    """
     stock, _ = _fetch(STOCK_ROWS, symbol="600519", view="stock")
-    assert "万股" in stock.records[0].provenance["unitNote"]
-    assert "not the raw shares/yuan" in stock.records[0].provenance["unitNote"]
+    prov = stock.records[0].provenance
+    # The names must say SHARES, because the vendor's own field says only "balance".
+    assert "repurchaseBalanceWanShares" in prov, sorted(prov)
+    assert "unlimitedBalanceWanShares" in prov and "limitedBalanceWanShares" in prov
+    assert "repurchaseBalanceWan" not in prov, "the misleading money-style name survived"
+    assert "different quantities" in prov["unitNote"]
+    assert "per-SHARE price" in prov["unitBasis"]
+    assert "222,448.17" in prov["unitBasis"], "the arithmetic proof should be quotable"
     market, _ = _fetch(MARKET_ROWS, view="market")
     assert market.records[0].unit == "10k_shares"
     assert "万股" in market.records[0].provenance["unitNote"]
-    print("ok the 万股/万元 convention is used and stated")
+    print("ok the balance fields are shares, market cap is money, and the proof is recorded")
 
 
 def test_market_view_claims_the_whole_market_row() -> None:
@@ -195,7 +210,7 @@ def main() -> int:
     test_stock_view_reports_the_date_and_freshness()
     test_a_stale_observation_is_flagged_not_presented_as_current()
     test_absence_from_the_register_is_not_a_zero()
-    test_units_are_wan_and_stated()
+    test_units_distinguish_shares_from_money()
     test_market_view_claims_the_whole_market_row()
     test_institution_view_reports_warning_counts_without_defining_them()
     test_views_and_missing_code_are_refused_clearly()
